@@ -5,9 +5,14 @@ python-multipart==0.0.12
 httpx==0.27.2
 
 # ─── Deep Learning ────────────────────────────────────────────────────────────
-# TensorFlow 2.20+ required for Python 3.13 support (3.9–3.12 can use 2.18+)
-tensorflow==2.20.0
-# Keras is installed as a TensorFlow dependency (>=3.10)
+# PyTorch stack (official MambaVision implementation is PyTorch-first)
+torch==2.4.1
+torchvision==0.19.1
+
+# Official MambaVision package + Hugging Face loader for official pretrained weights
+mambavision==1.2.0
+transformers==4.43.3
+safetensors==0.4.5
 
 # ─── Computer Vision ──────────────────────────────────────────────────────────
 opencv-python-headless==4.10.0.84
@@ -23,9 +28,6 @@ matplotlib==3.9.3
 
 # ─── Machine Learning / Metrics ───────────────────────────────────────────────
 scikit-learn==1.5.2
-
-# ─── Grad-CAM / Explainability (TensorFlow) ───────────────────────────────────
-tf-explain==0.3.1
 
 # ─── Configuration / Environment ──────────────────────────────────────────────
 python-dotenv==1.0.1

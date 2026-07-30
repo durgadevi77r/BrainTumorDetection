@@ -1,5 +1,5 @@
 """
-training/checkpoints.py — Checkpoint lifecycle helpers.
+training/checkpoints.py — PyTorch checkpoint lifecycle helpers.
 
 Provides functions for saving, loading, listing, and deleting model
 checkpoints independently of the main training loop.
@@ -10,17 +10,18 @@ Directory layout written by this module
         <architecture>/
             checkpoints/
                 <experiment_id>/
-                    best_weights.h5
-                    checkpoint_info.json   ← metadata snapshot
+                    best_weights.pt           ← torch state_dict
+                    checkpoint_info.json      ← metadata snapshot
 
 Usage
 -----
     from training.checkpoints import save_checkpoint_info, load_best_weights
     from training.config import TrainingConfig
+    import torch.nn as nn
 
-    cfg = TrainingConfig(architecture="resnet50")
-    save_checkpoint_info(cfg, experiment_id="exp-001", metrics={"val_accuracy": 0.97})
-    success = load_best_weights(model, cfg, experiment_id="exp-001")
+    cfg = TrainingConfig(architecture="mambavision")
+    save_checkpoint_info(cfg, "exp-001", metrics={"val_accuracy": 0.97})
+    success = load_best_weights(model, cfg, "exp-001")
 """
 
 from __future__ import annotations
@@ -31,7 +32,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import tensorflow as tf
+import torch
+import torch.nn as nn
 
 from app.core.logging import logger
 from training.config import TrainingConfig
@@ -45,16 +47,12 @@ def checkpoint_dir(cfg: TrainingConfig, experiment_id: str) -> Path:
 
 
 def best_weights_path(cfg: TrainingConfig, experiment_id: str) -> Path:
-    """Return the absolute path to best_weights.weights.h5.
-
-    Keras 3 (TF 2.16+) requires ``.weights.h5`` suffix when using
-    ``save_weights_only=True`` in ``ModelCheckpoint``.
-    """
-    return checkpoint_dir(cfg, experiment_id) / "best_weights.weights.h5"
+    """Return the absolute path to ``best_weights.pt``."""
+    return checkpoint_dir(cfg, experiment_id) / "best_weights.pt"
 
 
 def checkpoint_info_path(cfg: TrainingConfig, experiment_id: str) -> Path:
-    """Return the absolute path to checkpoint_info.json."""
+    """Return the absolute path to ``checkpoint_info.json``."""
     return checkpoint_dir(cfg, experiment_id) / "checkpoint_info.json"
 
 
@@ -69,14 +67,14 @@ def save_checkpoint_info(
     phase: int = 1,
 ) -> Path:
     """
-    Write a ``checkpoint_info.json`` sidecar next to ``best_weights.h5``.
+    Write a ``checkpoint_info.json`` sidecar next to ``best_weights.pt``.
 
     Parameters
     ----------
     cfg : TrainingConfig
     experiment_id : str
     metrics : dict | None
-        Metric snapshot at the best epoch (e.g. ``{"val_accuracy": 0.97}``).
+        Metric snapshot at the best epoch.
     epoch : int | None
         The best epoch number (0-indexed).
     phase : int
@@ -117,19 +115,23 @@ def save_checkpoint_info(
 # ─── Load ─────────────────────────────────────────────────────────────────────
 
 def load_best_weights(
-    model: tf.keras.Model,
+    model: nn.Module,
     cfg: TrainingConfig,
     experiment_id: str,
+    *,
+    device: Optional[torch.device] = None,
 ) -> bool:
     """
-    Load ``best_weights.h5`` into *model* in-place.
+    Load ``best_weights.pt`` into *model* in-place.
 
     Parameters
     ----------
-    model : tf.keras.Model
-        A compiled model whose architecture matches the checkpoint.
+    model : nn.Module
+        A model whose architecture matches the checkpoint.
     cfg : TrainingConfig
     experiment_id : str
+    device : torch.device | None
+        Map location for loading weights.  Defaults to CPU.
 
     Returns
     -------
@@ -141,8 +143,10 @@ def load_best_weights(
         logger.warning(f"No checkpoint found at {path}")
         return False
 
+    map_loc = device or torch.device("cpu")
     try:
-        model.load_weights(str(path))
+        state = torch.load(str(path), map_location=map_loc, weights_only=True)
+        model.load_state_dict(state)
         logger.info(f"Best weights loaded from {path}")
         return True
     except Exception as exc:
@@ -154,18 +158,7 @@ def load_checkpoint_info(
     cfg: TrainingConfig,
     experiment_id: str,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Return the ``checkpoint_info.json`` for one experiment, or None.
-
-    Parameters
-    ----------
-    cfg : TrainingConfig
-    experiment_id : str
-
-    Returns
-    -------
-    dict | None
-    """
+    """Return ``checkpoint_info.json`` for one experiment, or None."""
     path = checkpoint_info_path(cfg, experiment_id)
     if not path.exists():
         return None
@@ -183,16 +176,8 @@ def list_checkpoints(cfg: TrainingConfig) -> List[Dict[str, Any]]:
     """
     List all experiment checkpoints for one architecture.
 
-    Returns a list of checkpoint info dicts (from ``checkpoint_info.json``),
-    sorted by ``saved_at`` descending (newest first).
-
-    Parameters
-    ----------
-    cfg : TrainingConfig
-
-    Returns
-    -------
-    list[dict]
+    Returns a list of checkpoint info dicts sorted by ``saved_at``
+    descending (newest first).
     """
     arch_dir = cfg.resolved_output_dir / cfg.architecture / "checkpoints"
     if not arch_dir.exists():
@@ -202,8 +187,8 @@ def list_checkpoints(cfg: TrainingConfig) -> List[Dict[str, Any]]:
     for exp_dir in arch_dir.iterdir():
         if not exp_dir.is_dir():
             continue
-        info_file = exp_dir / "checkpoint_info.json"
-        weights_file = exp_dir / "best_weights.h5"
+        info_file    = exp_dir / "checkpoint_info.json"
+        weights_file = exp_dir / "best_weights.pt"
         entry: Dict[str, Any] = {"experiment_id": exp_dir.name}
         if info_file.exists():
             try:
@@ -229,10 +214,8 @@ def delete_checkpoint(
 
     Parameters
     ----------
-    cfg : TrainingConfig
-    experiment_id : str
     confirm : bool
-        Must be True to actually delete (safety guard).
+        Must be True to execute (safety guard).
 
     Returns
     -------
@@ -240,9 +223,7 @@ def delete_checkpoint(
         True when deletion succeeded.
     """
     if not confirm:
-        logger.warning(
-            "delete_checkpoint() called without confirm=True — no action taken."
-        )
+        logger.warning("delete_checkpoint() called without confirm=True — no action taken.")
         return False
 
     path = checkpoint_dir(cfg, experiment_id)

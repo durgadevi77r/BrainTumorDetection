@@ -1,6 +1,6 @@
 # ─── ai-service/Dockerfile ────────────────────────────────────────────────────
 #
-# Multi-stage build for the Python / TensorFlow AI service.
+# Multi-stage build for the Python / PyTorch AI service.
 #
 # Stages
 # ──────
@@ -8,8 +8,9 @@
 #   builder  — compiles native extensions into a clean /install prefix
 #   runtime  — minimal python:3.12-slim with only runtime artifacts
 #
-# CPU-only build (TensorFlow 2.20 ships CPU kernels by default).
-# For GPU: swap base images to nvidia/cuda:12.x-cudnn9-runtime-ubuntu22.04
+# CPU-only build (PyTorch CPU wheels).
+# For GPU: swap base images to nvidia/cuda:12.x-cudnn9-runtime-ubuntu22.04 and
+# adjust torch installation accordingly.
 #
 # Build:
 #   docker build -t brain-tumor-ai-service:latest ./ai-service
@@ -62,14 +63,14 @@ ARG VERSION="1.0.0"
 
 # OCI image labels (visible in `docker inspect` and container registries)
 LABEL org.opencontainers.image.title="Brain Tumour Detection — AI Service" \
-      org.opencontainers.image.description="FastAPI / TensorFlow MRI classification service" \
+      org.opencontainers.image.description="FastAPI / PyTorch MRI classification service" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${GIT_COMMIT}" \
       org.opencontainers.image.source="https://github.com/your-org/brain-tumor-detection" \
       org.opencontainers.image.licenses="MIT"
 
-# Runtime OS libraries required by OpenCV-headless and TensorFlow
+# Runtime OS libraries required by OpenCV-headless and PyTorch (CPU)
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         libglib2.0-0 \
@@ -125,9 +126,7 @@ ENV PYTHONUNBUFFERED=1 \
     IMAGE_SIZE=224 \
     IMAGE_CHANNELS=3 \
     CLASS_NAMES=glioma,meningioma,notumor,pituitary \
-    UVICORN_WORKERS=2 \
-    TF_CPP_MIN_LOG_LEVEL=2 \
-    TF_ENABLE_ONEDNN_OPTS=0
+    UVICORN_WORKERS=2
 
 EXPOSE 8000
 

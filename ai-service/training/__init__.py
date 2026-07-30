@@ -5,13 +5,10 @@ The canonical entry points are:
 
     from training import Trainer, TrainingConfig, train
     from training import Experiment, ExperimentRegistry
-    from training import build_callbacks
-
-CLI:
-    python -m training.trainer --architecture efficientnet --epochs 20
+    from training import build_callbacks, CallbackBundle
 """
 
-from training.callbacks import build_callbacks
+from training.callbacks import build_callbacks, CallbackBundle, get_best_checkpoint_path
 from training.checkpoints import (
     checkpoint_dir,
     delete_checkpoint,
@@ -32,6 +29,8 @@ __all__ = [
     "Experiment",
     "ExperimentRegistry",
     "build_callbacks",
+    "CallbackBundle",
+    "get_best_checkpoint_path",
     "checkpoint_dir",
     "save_checkpoint_info",
     "load_best_weights",

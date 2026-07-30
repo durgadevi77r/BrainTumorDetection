@@ -84,9 +84,9 @@ def _mock_keras_model(num_classes: int = 4) -> MagicMock:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestInferenceConfig:
-    def test_default_model_is_efficientnet(self) -> None:
+    def test_default_model_is_mambavision(self) -> None:
         from app.inference.config import InferenceConfig
-        assert InferenceConfig().model_name == "efficientnet"
+        assert InferenceConfig().model_name == "mambavision"
 
     def test_model_name_normalised_to_lowercase(self) -> None:
         from app.inference.config import InferenceConfig
@@ -529,15 +529,15 @@ def _insert_fake(cache, name: str) -> None:
 
 class TestListAvailableModels:
 
-    def test_returns_list_of_four_architectures(self) -> None:
+    def test_returns_list_of_five_architectures(self) -> None:
         from app.inference.cache import list_available_models
         models = list_available_models()
-        assert len(models) == 4
+        assert len(models) == 5
 
     def test_all_known_architectures_present(self) -> None:
         from app.inference.cache import list_available_models
         names = {m["name"] for m in list_available_models()}
-        assert names == {"cnn", "vgg16", "resnet50", "efficientnet"}
+        assert names == {"mambavision", "cnn", "vgg16", "resnet50", "efficientnet"}
 
     def test_each_entry_has_required_keys(self) -> None:
         from app.inference.cache import list_available_models
@@ -1326,10 +1326,10 @@ class TestInferenceAPIRoutes:
     def test_list_models_success_flag(self) -> None:
         assert client.get("/api/v1/models").json()["success"] is True
 
-    def test_list_models_data_is_list_of_four(self) -> None:
+    def test_list_models_data_is_list_of_five(self) -> None:
         data = client.get("/api/v1/models").json()["data"]
         assert isinstance(data, list)
-        assert len(data) == 4
+        assert len(data) == 5
 
     def test_list_models_cache_stats_present(self) -> None:
         body = client.get("/api/v1/models").json()
@@ -1344,7 +1344,7 @@ class TestInferenceAPIRoutes:
 
     def test_list_models_covers_all_architectures(self) -> None:
         names = {e["name"] for e in client.get("/api/v1/models").json()["data"]}
-        assert names == {"cnn", "vgg16", "resnet50", "efficientnet"}
+        assert names == {"mambavision", "cnn", "vgg16", "resnet50", "efficientnet"}
 
     # ── POST /models/reload ───────────────────────────────────────────────────
 
@@ -1428,7 +1428,7 @@ class TestModuleLevelPredict:
         from app.inference import predict
         with patch("app.inference.pipeline.get_model", return_value=_mock_keras_model()):
             result = predict(_varied_png_bytes())
-        assert result.metadata.model_name in ("cnn", "vgg16", "resnet50", "efficientnet")
+        assert result.metadata.model_name in ("mambavision", "cnn", "vgg16", "resnet50", "efficientnet")
 
     def test_predict_top_k_respected(self) -> None:
         from app.inference import predict

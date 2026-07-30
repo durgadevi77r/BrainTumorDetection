@@ -31,20 +31,20 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-import tensorflow as tf
-
 from app.core.logging import logger
 from app.models.load_model import (
     _resolve_model_path,
+    clear_model_cache,
     get_model_info,
     is_model_available,
+    load_keras_model,
 )
 
 
 # ─── Cache entry ──────────────────────────────────────────────────────────────
 
 class _CacheEntry:
-    """Internal wrapper around a loaded Keras model."""
+    """Internal wrapper around a loaded model adapter."""
 
     __slots__ = (
         "model", "model_name", "loaded_at", "last_accessed_at",
@@ -53,7 +53,7 @@ class _CacheEntry:
 
     def __init__(
         self,
-        model: tf.keras.Model,
+        model: Any,
         model_name: str,
         load_duration_ms: float,
         model_info: Dict[str, Any],
@@ -86,7 +86,7 @@ class _CacheEntry:
 
 class ModelCache:
     """
-    Thread-safe LRU cache for Keras models.
+    Thread-safe LRU cache for models.
 
     Parameters
     ----------
@@ -107,7 +107,7 @@ class ModelCache:
 
     # ── Core operations ───────────────────────────────────────────────────────
 
-    def get(self, model_name: str) -> Optional[tf.keras.Model]:
+    def get(self, model_name: str) -> Optional[Any]:
         """
         Return a cached model or None (does NOT auto-load).
 
@@ -125,7 +125,7 @@ class ModelCache:
             self._total_hits += 1
             return entry.model
 
-    def load(self, model_name: str) -> tf.keras.Model:
+    def load(self, model_name: str) -> Any:
         """
         Load *model_name* from disk, insert into the cache, and return it.
 
@@ -136,7 +136,7 @@ class ModelCache:
         FileNotFoundError
             When no saved weights exist for *model_name*.
         RuntimeError
-            When TensorFlow fails to deserialise the model.
+            When the model fails to deserialise.
         """
         name = model_name.lower()
         model_path = _resolve_model_path(name)
@@ -144,7 +144,8 @@ class ModelCache:
 
         t0 = time.perf_counter()
         try:
-            model: tf.keras.Model = tf.keras.models.load_model(str(model_path))
+            clear_model_cache(name)
+            model = load_keras_model(name)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load model '{name}' from {model_path}: {exc}"
@@ -169,7 +170,7 @@ class ModelCache:
         )
         return model
 
-    def get_or_load(self, model_name: str) -> tf.keras.Model:
+    def get_or_load(self, model_name: str) -> Any:
         """
         Return cached model, loading from disk if not present.
 
@@ -181,7 +182,7 @@ class ModelCache:
             return model
         return self.load(model_name)
 
-    def reload(self, model_name: str) -> tf.keras.Model:
+    def reload(self, model_name: str) -> Any:
         """
         Force a fresh load from disk, replacing any cached entry.
 
@@ -189,7 +190,7 @@ class ModelCache:
 
         Returns
         -------
-        tf.keras.Model
+        Any
             Freshly loaded model.
         """
         name = model_name.lower()
@@ -267,7 +268,7 @@ class ModelCache:
             Each entry: {name, available, cached, model_info (if available)}
         """
         from app.core.config import settings
-        architectures = ("cnn", "vgg16", "resnet50", "efficientnet")
+        architectures = ("mambavision", "cnn", "vgg16", "resnet50", "efficientnet")
         results = []
         for arch in architectures:
             available = is_model_available(arch)
@@ -297,12 +298,12 @@ _cache = ModelCache(capacity=4)
 
 # ── Module-level convenience functions ────────────────────────────────────────
 
-def get_model(model_name: str) -> tf.keras.Model:
+def get_model(model_name: str) -> Any:
     """Load (cached) the requested model — primary inference entry point."""
     return _cache.get_or_load(model_name)
 
 
-def reload_model(model_name: str) -> tf.keras.Model:
+def reload_model(model_name: str) -> Any:
     """Hot-reload: evict from cache and reload from disk."""
     return _cache.reload(model_name)
 

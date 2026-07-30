@@ -15,8 +15,10 @@ THIRD_PARTY = [
     "fastapi",
     "uvicorn",
     "multipart",
-    "tensorflow",
-    "keras",
+    "torch",
+    "torchvision",
+    "transformers",
+    "mambavision",
     "cv2",
     "numpy",
     "pandas",
@@ -37,15 +39,29 @@ APP_MODULES = [
     "app.main",
     "app.api.routes",
     # Preprocessing
+    "app.preprocessing.config",
+    "app.preprocessing.transforms",
+    "app.preprocessing.augmentation",
     "app.preprocessing.preprocess",
     "app.preprocessing",
-    # Models
+    # Models — MambaVision sub-package
+    "app.models.mambavision.config",
+    "app.models.mambavision.factory",
+    "app.models.mambavision.predictor",
+    "app.models.mambavision.storage",
+    # Models — main pipeline
     "app.models.architectures",
     "app.models.train",
     "app.models.predict",
     "app.models.evaluate",
     "app.models.load_model",
     "app.models.save_model",
+    # Training package
+    "training.config",
+    "training.callbacks",
+    "training.checkpoints",
+    "training.experiment",
+    "training.trainer",
     # Utils
     "app.utils.gradcam",
 ]

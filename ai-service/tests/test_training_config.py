@@ -34,7 +34,7 @@ from training.config import (
 class TestTrainingConfigDefaults:
     def test_default_architecture(self):
         cfg = TrainingConfig()
-        assert cfg.architecture == "efficientnet"
+        assert cfg.architecture == "mambavision"
 
     def test_default_epochs(self):
         cfg = TrainingConfig()
@@ -156,7 +156,7 @@ class TestTrainingConfigSerialisation:
         cfg = TrainingConfig()
         d = cfg.to_dict()
         assert isinstance(d, dict)
-        assert d["architecture"] == "efficientnet"
+        assert d["architecture"] == "mambavision"
 
     def test_from_dict_round_trip(self):
         cfg1 = TrainingConfig(architecture="vgg16", epochs=10, batch_size=16)
@@ -170,7 +170,7 @@ class TestTrainingConfigSerialisation:
         d = TrainingConfig().to_dict()
         d["unknown_future_field"] = "ignored"
         cfg = TrainingConfig.from_dict(d)
-        assert cfg.architecture == "efficientnet"
+        assert cfg.architecture == "mambavision"
 
     def test_save_json_and_from_json(self, tmp_path):
         cfg1 = TrainingConfig(architecture="resnet50", epochs=5)

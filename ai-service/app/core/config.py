@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # ── Model paths ───────────────────────────────────────────────────────────
     saved_models_dir: Path = BASE_DIR / "saved_models"
-    active_model: str      = "efficientnet"   # cnn | vgg16 | resnet50 | efficientnet
+    active_model: str      = "mambavision"   # cnn | vgg16 | resnet50 | efficientnet | mambavision
 
     @property
     def active_model_path(self) -> Path:
@@ -62,8 +62,13 @@ class Settings(BaseSettings):
 
     @property
     def input_shape(self) -> tuple:
-        """Keras-style input shape (H, W, C)."""
+        """NHWC input shape (H, W, C) — used by preprocessing and legacy code."""
         return (self.image_size, self.image_size, self.image_channels)
+
+    @property
+    def input_shape_nchw(self) -> tuple:
+        """PyTorch-style input shape (C, H, W) — used by torch model builders."""
+        return (self.image_channels, self.image_size, self.image_size)
 
     # ── Classification classes ─────────────────────────────────────────────
     class_names: str = "glioma,meningioma,notumor,pituitary"
@@ -120,7 +125,7 @@ class Settings(BaseSettings):
     @field_validator("active_model")
     @classmethod
     def validate_model_name(cls, v: str) -> str:
-        allowed = {"cnn", "vgg16", "resnet50", "efficientnet"}
+        allowed = {"cnn", "vgg16", "resnet50", "efficientnet", "mambavision"}
         if v.lower() not in allowed:
             raise ValueError(f"active_model must be one of {allowed}, got '{v}'")
         return v.lower()

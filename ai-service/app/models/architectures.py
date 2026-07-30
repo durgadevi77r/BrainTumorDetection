@@ -1,246 +1,277 @@
 """
-architectures.py — Keras model factory for all four supported architectures.
+architectures.py — PyTorch model factory for all supported architectures.
 
 Architectures
 -------------
-- cnn         : Lightweight custom CNN (fast baseline, good for limited compute)
-- vgg16       : VGG-16 with ImageNet weights, classification head replaced
-- resnet50    : ResNet-50 with ImageNet weights, classification head replaced
-- efficientnet: EfficientNetB3 with ImageNet weights (default, best accuracy)
+- mambavision : Official MambaVision-T (NVIDIA, ImageNet pretrained) with
+                the classifier head replaced for 4 brain-tumor classes.
+                Uses the official ``mambavision`` package + Hugging Face hub.
+- cnn         : Lightweight custom CNN (fast baseline, CPU-friendly).
+- vgg16       : torchvision VGG-16 with frozen backbone + custom head.
+- resnet50    : torchvision ResNet-50 with frozen backbone + custom head.
+- efficientnet: torchvision EfficientNet-B3 with frozen backbone + custom head.
 
 All transfer-learning models use the same two-phase approach:
-  Phase 1 — frozen backbone, train only the new classification head
-  Phase 2 — unfreeze the top N layers for fine-tuning (called externally
-             by setting model.trainable = True selectively)
+  Phase 1 — frozen backbone, train only the new classification head.
+  Phase 2 — unfreeze the top N layers for fine-tuning (via
+             ``unfreeze_top_layers()``).
 
 Usage
 -----
     from app.models.architectures import build_model
+    model = build_model("mambavision")
     model = build_model("efficientnet")
-    model.summary()
 """
 
 from __future__ import annotations
 
-from typing import Tuple
+from typing import Optional, Tuple
 
-import tensorflow as tf
-from tensorflow.keras import layers, models, regularizers
-from tensorflow.keras.applications import (
-    EfficientNetB3,
-    ResNet50,
-    VGG16,
-)
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torchvision.models as tv_models
+from transformers import AutoModelForImageClassification
 
 from app.core.config import settings
 from app.core.logging import logger
+from app.models.mambavision.config import MambaVisionHFConfig
+from app.models.mambavision.factory import build_mambavision_model
 
 
-# ─── Shared head factory ──────────────────────────────────────────────────────
+# ─── Shared classification head ───────────────────────────────────────────────
 
-def _classification_head(
-    x: tf.Tensor,
-    *,
-    units: int = 256,
-    dropout_rate: float = 0.5,
-    l2: float = 1e-4,
-    num_classes: int | None = None,
-) -> tf.Tensor:
+class _ClassificationHead(nn.Module):
     """
     Dense classification head appended to any backbone.
 
     Architecture:
-        GlobalAveragePooling2D → BatchNorm → Dense(units, relu, L2)
-        → Dropout → Dense(num_classes, softmax)
+        AdaptiveAvgPool2d → Flatten → BatchNorm1d → Linear(units, relu)
+        → Dropout → Linear(num_classes)
+
+    For MambaVision the backbone already ends with a pooled feature vector
+    so the pool/flatten steps are skipped when ``needs_pool=False``.
     """
-    num_classes = num_classes or settings.num_classes
-    x = layers.GlobalAveragePooling2D(name="gap")(x)
-    x = layers.BatchNormalization(name="bn_head")(x)
-    x = layers.Dense(
-        units,
-        activation="relu",
-        kernel_regularizer=regularizers.l2(l2),
-        name="fc1",
-    )(x)
-    x = layers.Dropout(dropout_rate, name="dropout_head")(x)
-    outputs = layers.Dense(num_classes, activation="softmax", name="predictions")(x)
-    return outputs
+
+    def __init__(
+        self,
+        in_features: int,
+        num_classes: int,
+        *,
+        units: int = 256,
+        dropout_rate: float = 0.5,
+        needs_pool: bool = True,
+    ) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        if needs_pool:
+            layers.append(nn.AdaptiveAvgPool2d((1, 1)))
+            layers.append(nn.Flatten())
+        layers.extend([
+            nn.BatchNorm1d(in_features),
+            nn.Linear(in_features, units),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout_rate),
+            nn.Linear(units, num_classes),
+        ])
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
 
 
 # ─── Custom CNN ───────────────────────────────────────────────────────────────
 
-def _build_custom_cnn(
-    input_shape: Tuple[int, int, int],
-    num_classes: int,
-) -> tf.keras.Model:
+class _ConvBlock(nn.Module):
+    """Conv→BN→ReLU × 2 → MaxPool → Dropout."""
+
+    def __init__(self, in_ch: int, out_ch: int, dropout: float = 0.25) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_ch, out_ch, 3, padding=1),
+            nn.BatchNorm2d(out_ch),
+            nn.ReLU(inplace=True),
+            nn.MaxPool2d(2),
+            nn.Dropout2d(dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+
+class CustomCNN(nn.Module):
+    """Lightweight 4-block CNN (32→64→128→256 filters)."""
+
+    def __init__(self, in_channels: int = 3, num_classes: int = 4) -> None:
+        super().__init__()
+        self.backbone = nn.Sequential(
+            _ConvBlock(in_channels, 32, dropout=0.25),
+            _ConvBlock(32, 64, dropout=0.25),
+            _ConvBlock(64, 128, dropout=0.30),
+            _ConvBlock(128, 256, dropout=0.30),
+        )
+        self.head = _ClassificationHead(256, num_classes, units=512, dropout_rate=0.5)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.backbone(x)
+        return self.head(x)
+
+
+# ─── Transfer-learning wrappers ───────────────────────────────────────────────
+
+class _TorchvisionModel(nn.Module):
     """
-    Lightweight 4-block CNN for fast experimentation.
-
-    Block structure:
-        Conv2D(BN, ReLU) × 2 → MaxPool → Dropout
-    Blocks: 32 → 64 → 128 → 256 filters.
+    Generic wrapper around a torchvision backbone that replaces the
+    classifier head and exposes a ``freeze_backbone()`` / ``unfreeze_top()``
+    interface consistent with the rest of the pipeline.
     """
-    inputs = layers.Input(shape=input_shape, name="input_image")
 
-    # Block 1
-    x = layers.Conv2D(32, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv1_1")(inputs)
-    x = layers.BatchNormalization(name="bn1_1")(x)
-    x = layers.Activation("relu", name="relu1_1")(x)
-    x = layers.Conv2D(32, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv1_2")(x)
-    x = layers.BatchNormalization(name="bn1_2")(x)
-    x = layers.Activation("relu", name="relu1_2")(x)
-    x = layers.MaxPooling2D(2, name="pool1")(x)
-    x = layers.Dropout(0.25, name="drop1")(x)
+    def __init__(
+        self,
+        backbone: nn.Module,
+        backbone_out_features: int,
+        num_classes: int,
+        units: int = 256,
+        dropout_rate: float = 0.5,
+        name: str = "model",
+    ) -> None:
+        super().__init__()
+        self.name_tag = name
+        self.backbone = backbone
+        self.head = _ClassificationHead(
+            backbone_out_features, num_classes,
+            units=units, dropout_rate=dropout_rate,
+        )
 
-    # Block 2
-    x = layers.Conv2D(64, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv2_1")(x)
-    x = layers.BatchNormalization(name="bn2_1")(x)
-    x = layers.Activation("relu", name="relu2_1")(x)
-    x = layers.Conv2D(64, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv2_2")(x)
-    x = layers.BatchNormalization(name="bn2_2")(x)
-    x = layers.Activation("relu", name="relu2_2")(x)
-    x = layers.MaxPooling2D(2, name="pool2")(x)
-    x = layers.Dropout(0.25, name="drop2")(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        features = self.backbone(x)
+        return self.head(features)
 
-    # Block 3
-    x = layers.Conv2D(128, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv3_1")(x)
-    x = layers.BatchNormalization(name="bn3_1")(x)
-    x = layers.Activation("relu", name="relu3_1")(x)
-    x = layers.Conv2D(128, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv3_2")(x)
-    x = layers.BatchNormalization(name="bn3_2")(x)
-    x = layers.Activation("relu", name="relu3_2")(x)
-    x = layers.MaxPooling2D(2, name="pool3")(x)
-    x = layers.Dropout(0.3, name="drop3")(x)
+    def freeze_backbone(self) -> None:
+        for p in self.backbone.parameters():
+            p.requires_grad_(False)
+        logger.debug(f"Backbone frozen for '{self.name_tag}'")
 
-    # Block 4
-    x = layers.Conv2D(256, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv4_1")(x)
-    x = layers.BatchNormalization(name="bn4_1")(x)
-    x = layers.Activation("relu", name="relu4_1")(x)
-    x = layers.Conv2D(256, 3, padding="same", kernel_regularizer=regularizers.l2(1e-4), name="conv4_2")(x)
-    x = layers.BatchNormalization(name="bn4_2")(x)
-    x = layers.Activation("relu", name="relu4_2")(x)
-    x = layers.MaxPooling2D(2, name="pool4")(x)
-    x = layers.Dropout(0.3, name="drop4")(x)
+    def unfreeze_top(self, n_layers: int) -> None:
+        """Unfreeze the last *n_layers* child modules of the backbone."""
+        children = list(self.backbone.children())
+        for child in children[-n_layers:]:
+            for p in child.parameters():
+                p.requires_grad_(True)
+        logger.info(f"Unfrozen top {n_layers} modules of '{self.name_tag}'")
 
-    # Classification head
-    outputs = _classification_head(x, units=512, dropout_rate=0.5, num_classes=num_classes)
 
-    model = models.Model(inputs=inputs, outputs=outputs, name="custom_cnn")
-    logger.debug(f"Built custom CNN | input={input_shape} classes={num_classes}")
+def _build_vgg16(num_classes: int) -> _TorchvisionModel:
+    base = tv_models.vgg16(weights=tv_models.VGG16_Weights.IMAGENET1K_V1)
+    # Strip original classifier
+    base.classifier = nn.Identity()
+    # VGG-16 features output: (512, 7, 7) → AdaptiveAvgPool → 512
+    model = _TorchvisionModel(base, 512, num_classes, units=256, name="vgg16")
+    model.freeze_backbone()
+    logger.debug(f"Built VGG-16 | classes={num_classes}")
     return model
 
 
-# ─── VGG-16 ───────────────────────────────────────────────────────────────────
-
-def _build_vgg16(
-    input_shape: Tuple[int, int, int],
-    num_classes: int,
-) -> tf.keras.Model:
-    """VGG-16 backbone (ImageNet weights) with a frozen base and custom head."""
-    base = VGG16(
-        include_top=False,
-        weights="imagenet",
-        input_shape=input_shape,
+def _build_resnet50(num_classes: int) -> _TorchvisionModel:
+    base = tv_models.resnet50(weights=tv_models.ResNet50_Weights.IMAGENET1K_V2)
+    in_features = base.fc.in_features
+    base.fc = nn.Identity()
+    # ResNet already ends with AdaptiveAvgPool; head needs_pool=False
+    base_out = in_features  # 2048
+    model = _TorchvisionModel(
+        base, base_out, num_classes,
+        units=256, name="resnet50",
     )
-    base.trainable = False  # Phase 1: freeze backbone
-
-    inputs = layers.Input(shape=input_shape, name="input_image")
-    x = base(inputs, training=False)
-    outputs = _classification_head(x, units=256, dropout_rate=0.5, num_classes=num_classes)
-
-    model = models.Model(inputs=inputs, outputs=outputs, name="vgg16")
-    logger.debug(f"Built VGG-16 | input={input_shape} classes={num_classes} frozen_layers={len(base.layers)}")
-    return model
-
-
-# ─── ResNet-50 ────────────────────────────────────────────────────────────────
-
-def _build_resnet50(
-    input_shape: Tuple[int, int, int],
-    num_classes: int,
-) -> tf.keras.Model:
-    """ResNet-50 backbone (ImageNet weights) with a frozen base and custom head."""
-    base = ResNet50(
-        include_top=False,
-        weights="imagenet",
-        input_shape=input_shape,
+    # Override head — ResNet returns a flat vector, no pool needed
+    model.head = _ClassificationHead(
+        base_out, num_classes, units=256, dropout_rate=0.5, needs_pool=False
     )
-    base.trainable = False  # Phase 1: freeze backbone
-
-    inputs = layers.Input(shape=input_shape, name="input_image")
-    x = base(inputs, training=False)
-    outputs = _classification_head(x, units=256, dropout_rate=0.5, num_classes=num_classes)
-
-    model = models.Model(inputs=inputs, outputs=outputs, name="resnet50")
-    logger.debug(f"Built ResNet-50 | input={input_shape} classes={num_classes} frozen_layers={len(base.layers)}")
+    model.freeze_backbone()
+    logger.debug(f"Built ResNet-50 | classes={num_classes}")
     return model
 
 
-# ─── EfficientNet-B3 ──────────────────────────────────────────────────────────
-
-def _build_efficientnet(
-    input_shape: Tuple[int, int, int],
-    num_classes: int,
-) -> tf.keras.Model:
-    """
-    EfficientNetB3 backbone (ImageNet weights) with a frozen base and custom head.
-
-    EfficientNetB3 expects pixel values in [0, 255] by default; the
-    preprocessing module already handles normalisation so we pass a rescaling
-    override of 1.0 to skip the built-in rescaling (handled upstream).
-    """
-    base = EfficientNetB3(
-        include_top=False,
-        weights="imagenet",
-        input_shape=input_shape,
+def _build_efficientnet(num_classes: int) -> _TorchvisionModel:
+    base = tv_models.efficientnet_b3(
+        weights=tv_models.EfficientNet_B3_Weights.IMAGENET1K_V1
     )
-    base.trainable = False  # Phase 1: freeze backbone
-
-    inputs = layers.Input(shape=input_shape, name="input_image")
-    x = base(inputs, training=False)
-    outputs = _classification_head(x, units=512, dropout_rate=0.5, num_classes=num_classes)
-
-    model = models.Model(inputs=inputs, outputs=outputs, name="efficientnet")
-    logger.debug(f"Built EfficientNetB3 | input={input_shape} classes={num_classes} frozen_layers={len(base.layers)}")
+    in_features = base.classifier[1].in_features
+    base.classifier = nn.Identity()
+    # EfficientNet ends with AdaptiveAvgPool → Flatten; head needs_pool=False
+    model = _TorchvisionModel(
+        base, in_features, num_classes,
+        units=512, name="efficientnet",
+    )
+    model.head = _ClassificationHead(
+        in_features, num_classes, units=512, dropout_rate=0.5, needs_pool=False
+    )
+    model.freeze_backbone()
+    logger.debug(f"Built EfficientNet-B3 | classes={num_classes}")
     return model
 
 
-# ─── Public factory ───────────────────────────────────────────────────────────
+# ─── MambaVision ──────────────────────────────────────────────────────────────
+
+def _build_mambavision(num_classes: int) -> AutoModelForImageClassification:
+    """
+    Load official MambaVision-T pretrained on ImageNet-1K and resize the
+    classifier head to ``num_classes`` using ignore_mismatched_sizes=True.
+
+    Returns the raw Hugging Face model (not wrapped in _TorchvisionModel)
+    because MambaVision already returns an object with a .logits attribute
+    that TorchImageClassifier handles correctly.
+    """
+    cfg = MambaVisionHFConfig(num_classes=num_classes)
+    model = build_mambavision_model(cfg=cfg, pretrained=True)
+    logger.debug(f"Built MambaVision-T | classes={num_classes}")
+    return model
+
+
+# ─── Builders registry ────────────────────────────────────────────────────────
 
 _BUILDERS = {
-    "cnn":         _build_custom_cnn,
-    "vgg16":       _build_vgg16,
-    "resnet50":    _build_resnet50,
+    "mambavision": _build_mambavision,
+    "cnn":          lambda n: CustomCNN(num_classes=n),
+    "vgg16":        _build_vgg16,
+    "resnet50":     _build_resnet50,
     "efficientnet": _build_efficientnet,
 }
 
 
+# ─── Public factory ───────────────────────────────────────────────────────────
+
 def build_model(
-    model_name: str | None = None,
+    model_name: Optional[str] = None,
     *,
-    input_shape: Tuple[int, int, int] | None = None,
-    num_classes: int | None = None,
+    input_shape: Optional[Tuple[int, int, int]] = None,   # kept for compat; unused
+    num_classes: Optional[int] = None,
     learning_rate: float = 1e-4,
-) -> tf.keras.Model:
+) -> nn.Module:
     """
-    Build and compile a Keras model for brain tumour classification.
+    Build a PyTorch model for brain-tumour classification.
 
     Parameters
     ----------
     model_name : str | None
-        One of "cnn" | "vgg16" | "resnet50" | "efficientnet".
+        One of "mambavision" | "cnn" | "vgg16" | "resnet50" | "efficientnet".
         Defaults to ``settings.active_model``.
     input_shape : tuple | None
-        (H, W, C) — defaults to ``settings.input_shape``.
+        Ignored (kept for backward-compatibility with old Keras callers).
+        PyTorch models infer input shape from the first forward pass.
     num_classes : int | None
         Number of output classes — defaults to ``settings.num_classes``.
     learning_rate : float
-        Initial learning rate for the Adam optimiser.
+        Not used here; kept for signature compatibility with old callers that
+        passed ``learning_rate`` to ``build_model()``.  The actual optimiser
+        is constructed by the training loop.
 
     Returns
     -------
-    tf.keras.Model
-        Compiled model ready for ``model.fit()``.
+    nn.Module
+        Model in eval mode (training loop calls ``model.train()`` itself).
 
     Raises
     ------
@@ -248,63 +279,113 @@ def build_model(
         If ``model_name`` is not one of the supported architectures.
     """
     name  = (model_name or settings.active_model).lower()
-    shape = input_shape or settings.input_shape
     n_cls = num_classes or settings.num_classes
 
     if name not in _BUILDERS:
         raise ValueError(
-            f"Unknown model '{name}'. "
-            f"Choose one of: {list(_BUILDERS.keys())}"
+            f"Unknown model '{name}'. Choose one of: {list(_BUILDERS.keys())}"
         )
 
-    model = _BUILDERS[name](shape, n_cls)
+    model = _BUILDERS[name](n_cls)
 
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
-        loss="categorical_crossentropy",
-        metrics=[
-            "accuracy",
-            tf.keras.metrics.AUC(name="auc"),
-            tf.keras.metrics.Precision(name="precision"),
-            tf.keras.metrics.Recall(name="recall"),
-        ],
-    )
-
-    total_params     = model.count_params()
-    trainable_params = sum(tf.size(w).numpy() for w in model.trainable_weights)
+    total_params     = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(
-        f"Model compiled | name={name} total_params={total_params:,} "
-        f"trainable_params={trainable_params:,} lr={learning_rate}"
+        f"Model built | name={name} total_params={total_params:,} "
+        f"trainable_params={trainable_params:,}"
     )
     return model
 
 
-def unfreeze_top_layers(model: tf.keras.Model, n_layers: int = 20) -> tf.keras.Model:
+def unfreeze_top_layers(model: nn.Module, n_layers: int = 20) -> nn.Module:
     """
-    Unfreeze the last ``n_layers`` of the backbone for fine-tuning (Phase 2).
+    Unfreeze the last ``n_layers`` backbone modules for Phase-2 fine-tuning.
 
-    Call this after Phase 1 training converges, then re-compile with a
-    lower learning rate (e.g. 1e-5).
+    Works for ``_TorchvisionModel`` instances (vgg16/resnet50/efficientnet)
+    and for HF MambaVision models.  For the custom CNN every layer is
+    already trainable so this is a no-op.
 
     Parameters
     ----------
-    model : tf.keras.Model
+    model : nn.Module
         A model previously returned by ``build_model()``.
     n_layers : int
-        Number of layers from the end of the backbone to unfreeze.
+        Number of child modules from the end of the backbone to unfreeze.
 
     Returns
     -------
-    tf.keras.Model
-        The same model with modified ``trainable`` flags (not re-compiled).
+    nn.Module
+        The same model with modified ``requires_grad`` flags (not copied).
     """
-    # Backbone is the second layer (index 1) for transfer-learning models
-    # For the custom CNN every layer is already trainable.
-    for layer in model.layers:
-        if hasattr(layer, "layers"):  # it's a sub-model (backbone)
-            for sub_layer in layer.layers[-n_layers:]:
-                if not isinstance(sub_layer, layers.BatchNormalization):
-                    sub_layer.trainable = True
-            logger.info(f"Unfrozen top {n_layers} layers of backbone '{layer.name}'")
-            break
+    if isinstance(model, _TorchvisionModel):
+        model.unfreeze_top(n_layers)
+        return model
+
+    if isinstance(model, CustomCNN):
+        # All parameters are already trainable
+        logger.info("unfreeze_top_layers: CustomCNN is fully trainable — no-op")
+        return model
+
+    # HF / MambaVision — unfreeze the last n_layers top-level children
+    children = list(model.children())
+    if not children:
+        # Flat model — unfreeze all
+        for p in model.parameters():
+            p.requires_grad_(True)
+        logger.info("unfreeze_top_layers: flat model — all parameters unfrozen")
+        return model
+
+    for child in children[-n_layers:]:
+        for p in child.parameters():
+            p.requires_grad_(True)
+
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(
+        f"unfreeze_top_layers: unfrozen top {n_layers} modules | "
+        f"trainable_params={trainable:,}"
+    )
     return model
+
+
+def build_optimizer(
+    model: nn.Module,
+    learning_rate: float = 1e-4,
+    optimizer_name: str = "adam",
+    weight_decay: float = 1e-4,
+    momentum: float = 0.9,
+) -> optim.Optimizer:
+    """
+    Build an optimiser over a model's trainable parameters.
+
+    Parameters
+    ----------
+    model : nn.Module
+    learning_rate : float
+    optimizer_name : str
+        One of "adam" | "adamw" | "sgd" | "rmsprop".
+    weight_decay : float
+        L2 penalty (used by Adam/AdamW/SGD).
+    momentum : float
+        SGD momentum (ignored by Adam/AdamW/RMSProp).
+
+    Returns
+    -------
+    optim.Optimizer
+    """
+    params = [p for p in model.parameters() if p.requires_grad]
+    name   = optimizer_name.lower()
+
+    if name == "adam":
+        return optim.Adam(params, lr=learning_rate, weight_decay=weight_decay)
+    if name == "adamw":
+        return optim.AdamW(params, lr=learning_rate, weight_decay=weight_decay)
+    if name == "sgd":
+        return optim.SGD(params, lr=learning_rate, momentum=momentum,
+                         weight_decay=weight_decay)
+    if name == "rmsprop":
+        return optim.RMSprop(params, lr=learning_rate, weight_decay=weight_decay)
+
+    raise ValueError(
+        f"Unknown optimizer '{optimizer_name}'. "
+        "Choose one of: adam | adamw | sgd | rmsprop"
+    )

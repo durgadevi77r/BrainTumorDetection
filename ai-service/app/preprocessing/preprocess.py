@@ -6,7 +6,7 @@ It delegates every low-level operation to the three sub-modules:
 
     config.py       — PreprocessConfig dataclass (all tunable parameters)
     transforms.py   — Pure stateless image functions (load, denoise, CLAHE, …)
-    augmentation.py — Keras ImageDataGenerator wrappers (train only)
+    augmentation.py — torchvision transform builders + MRIDataset + DataLoader
 
 Five public contexts
 --------------------
@@ -25,15 +25,13 @@ Five public contexts
     base64-encoded and sent back to the browser for visual inspection.
 
 ``build_generators``
-    Builds Keras DirectoryIterators for the **pre-split** directory layout
+    Builds PyTorch DataLoaders for the **pre-split** directory layout
     produced by the dataset module:
-        processed/train/<class>/   → augmented training generator
-        processed/val/<class>/     → eval generator (rescale only)
-    Replaces the old ``build_data_generators`` that required a single root
-    directory with a validation_split fraction.
+        processed/train/<class>/   → augmented training DataLoader
+        processed/val/<class>/     → eval DataLoader (no augmentation)
 
 ``build_test_generator``
-    Builds a non-shuffled eval generator for the test split.
+    Builds a non-shuffled eval DataLoader for the test split.
 
 Backward-compatible shims
 --------------------------
@@ -42,6 +40,11 @@ The old function names (``preprocess_image``, ``preprocess_image_for_gradcam``,
 ``apply_clahe``, ``resize_image``) are preserved as thin wrappers so that
 the rest of the codebase (predict.py, gradcam.py, train.py, evaluate.py)
 continues to work without any changes.
+
+NOTE: ``build_data_generators`` (the legacy single-root + validation_split
+variant) now builds a PyTorch DataLoader from the pre-split processed/
+directory instead of using an in-memory random split.  Callers that relied
+on ``validation_split`` should switch to ``build_generators`` directly.
 """
 
 from __future__ import annotations
@@ -63,12 +66,6 @@ from app.preprocessing.transforms import (
     apply_median_filter as _median,
     apply_clahe as _clahe,
     resize_image as _resize,
-)
-from app.preprocessing.augmentation import (
-    AugmentationConfig,
-    build_data_generators_from_split,
-    build_eval_datagen,
-    build_train_datagen,
 )
 
 
@@ -116,7 +113,8 @@ def preprocess_for_inference(
     3. CLAHE contrast enhance (if ``cfg.apply_clahe``).
     4. Lanczos resize to ``cfg.image_size × cfg.image_size``.
     5. BGR → RGB.
-    6. z-score normalise with ``cfg.norm_mean`` / ``cfg.norm_std``.
+    6. z-score normalise with ``cfg.norm_mean`` / ``cfg.norm_std``
+       (or simple /255 rescale when ``cfg.normalise`` is False).
     7. Optionally add batch dimension.
 
     Parameters
@@ -234,7 +232,7 @@ def preprocess_for_preview(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Training / validation generators (pre-split directories)
+# 4. Training / validation DataLoaders (pre-split directories)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_generators(
@@ -242,11 +240,12 @@ def build_generators(
     *,
     batch_size: int = 32,
     cfg: Optional[PreprocessConfig] = None,
-    aug_cfg: Optional[AugmentationConfig] = None,
+    aug_cfg: Optional["AugmentationConfig"] = None,
     seed: int = 42,
-):
+    num_workers: int = 0,
+) -> "Tuple[DataLoader, DataLoader]":
     """
-    Build (train_gen, val_gen) from a **pre-split** processed directory.
+    Build ``(train_loader, val_loader)`` from a **pre-split** processed directory.
 
     Expected layout (produced by ``app.dataset.splitter``)::
 
@@ -255,8 +254,8 @@ def build_generators(
             val/   <class folders>
             test/  <class folders>
 
-    The training generator applies the full ``AugmentationConfig`` stack.
-    The validation generator rescales only — no augmentation.
+    The training DataLoader applies the full ``AugmentationConfig`` stack.
+    The validation DataLoader uses resize + normalise only — no augmentation.
 
     Parameters
     ----------
@@ -270,12 +269,17 @@ def build_generators(
         Augmentation parameters for the training split.
     seed : int
         Random seed.
+    num_workers : int
+        DataLoader worker count.
 
     Returns
     -------
-    tuple[DirectoryIterator, DirectoryIterator]
-        (train_generator, val_generator)
+    tuple[DataLoader, DataLoader]
+        (train_loader, val_loader)
     """
+    # Lazy imports: torch is only needed for training DataLoaders
+    from app.preprocessing.augmentation import build_data_generators_from_split  # noqa: PLC0415
+
     cfg = cfg or DEFAULT_CONFIG
     processed_dir = Path(processed_dir)
     train_dir = processed_dir / "train"
@@ -288,11 +292,13 @@ def build_generators(
         batch_size=batch_size,
         aug_cfg=aug_cfg,
         seed=seed,
+        num_workers=num_workers,
+        class_names=settings.classes,
     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Test generator
+# 5. Test DataLoader
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_test_generator(
@@ -301,15 +307,16 @@ def build_test_generator(
     cfg: Optional[PreprocessConfig] = None,
     target_size: Optional[int] = None,
     batch_size: int = 32,
-):
+    num_workers: int = 0,
+) -> "DataLoader":
     """
-    Build a non-shuffled test generator for evaluation.
+    Build a non-shuffled test DataLoader for evaluation.
 
     Accepts either:
     - A pre-split ``processed_dir/test/`` directory (preferred), or
     - Any directory containing one sub-folder per class.
 
-    No augmentation — only rescaling to [0, 1].
+    No augmentation — only resize + normalise.
 
     Parameters
     ----------
@@ -321,38 +328,52 @@ def build_test_generator(
         Explicit resize override (legacy kwarg — prefer cfg).
     batch_size : int
         Batch size.
+    num_workers : int
+        DataLoader worker count.
 
     Returns
     -------
-    DirectoryIterator
+    DataLoader
     """
-    cfg = cfg or DEFAULT_CONFIG
+    # Lazy imports: torch is only needed when building DataLoaders
+    import torch  # noqa: PLC0415
+    from torch.utils.data import DataLoader  # noqa: PLC0415
+    from app.preprocessing.augmentation import MRIDataset, build_eval_transform  # noqa: PLC0415
+
+    cfg  = cfg or DEFAULT_CONFIG
     size = target_size or cfg.image_size
     test_dir = Path(test_dir)
 
     if not test_dir.exists():
         raise FileNotFoundError(f"Test directory not found: {test_dir}")
 
-    datagen = build_eval_datagen()
-    gen = datagen.flow_from_directory(
-        str(test_dir),
-        target_size=(size, size),
+    eval_transform = build_eval_transform(image_size=size)
+    dataset = MRIDataset(
+        test_dir,
+        transform=eval_transform,
+        class_names=settings.classes,
+    )
+
+    loader = DataLoader(
+        dataset,
         batch_size=batch_size,
-        class_mode="categorical",
         shuffle=False,
+        num_workers=num_workers,
+        pin_memory=torch.cuda.is_available(),
+        drop_last=False,
     )
 
     logger.info(
-        f"Test generator built | samples={gen.samples} "
+        f"Test DataLoader built | samples={len(dataset)} "
         f"batch={batch_size} size={size}"
     )
-    return gen
+    return loader
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Backward-compatible shims
 # ─────────────────────────────────────────────────────────────────────────────
-# These thin wrappers keep the existing callers (predict.py, gradcam.py,
+# These thin wrappers keep existing callers (predict.py, gradcam.py,
 # train.py, evaluate.py) working without modification.
 
 def preprocess_image(
@@ -366,16 +387,11 @@ def preprocess_image(
 ) -> np.ndarray:
     """
     Backward-compatible shim → ``preprocess_for_inference()``.
-
-    The ``target_size``, ``apply_denoise``, and ``apply_contrast`` keyword
-    arguments are converted into a ``PreprocessConfig`` override so that
-    callers with the old signature continue to work.
     """
     _cfg = PreprocessConfig(
         image_size=target_size or (cfg.image_size if cfg else DEFAULT_CONFIG.image_size),
         apply_denoise=apply_denoise,
         apply_clahe=apply_contrast,
-        # carry all other fields from the supplied cfg or default
         normalise=cfg.normalise if cfg else DEFAULT_CONFIG.normalise,
         norm_mean=cfg.norm_mean if cfg else DEFAULT_CONFIG.norm_mean,
         norm_std=cfg.norm_std   if cfg else DEFAULT_CONFIG.norm_std,
@@ -415,96 +431,66 @@ def build_data_generators(
     target_size: Optional[int] = None,
     batch_size: int = 32,
     validation_split: float = 0.2,
+    aug_cfg: Optional["AugmentationConfig"] = None,
     seed: int = 42,
-):
+    num_workers: int = 0,
+) -> "Tuple[DataLoader, DataLoader]":
     """
-    Backward-compatible shim for the old single-directory generator.
+    Backward-compatible shim → ``build_generators()``.
 
-    .. deprecated::
-        Prefer ``build_generators(processed_dir)`` which uses the pre-split
-        layout produced by ``app.dataset.splitter``.
+    The old signature accepted a single dataset_dir + validation_split.
+    This shim delegates to the pre-split directory layout instead.
+    If ``dataset_dir`` is a processed directory (has train/ and val/ sub-dirs),
+    it is used directly.  Otherwise ``settings.dataset_processed_dir`` is used.
 
-    When the old layout is used (one root dir, no train/val sub-dirs) this
-    shim falls back to Keras ``validation_split`` behaviour.
+    Parameters
+    ----------
+    dataset_dir : str | Path
+        Either a processed root (containing train/ val/) or any directory.
+        If train/ does not exist inside it, falls back to
+        ``settings.dataset_processed_dir``.
+    target_size : int | None
+        Resize override (legacy kwarg).
+    batch_size : int
+    validation_split : float
+        Ignored — kept for signature compatibility.
+    aug_cfg : AugmentationConfig | None
+    seed : int
+    num_workers : int
+
+    Returns
+    -------
+    tuple[DataLoader, DataLoader]
+        (train_loader, val_loader)
     """
     dataset_dir = Path(dataset_dir)
-    if not dataset_dir.exists():
-        raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
+    train_dir   = dataset_dir / "train"
 
-    size = target_size or settings.image_size
-
-    # Detect whether this is already a split directory
-    train_dir = dataset_dir / "train"
-    val_dir   = dataset_dir / "val"
-    if train_dir.is_dir() and val_dir.is_dir():
-        return build_data_generators_from_split(
-            train_dir=train_dir,
-            val_dir=val_dir,
-            image_size=size,
-            batch_size=batch_size,
-            seed=seed,
+    # Fall back to the canonical processed dir if train/ is not present
+    if not train_dir.exists():
+        processed = settings.dataset_processed_dir
+        logger.warning(
+            f"build_data_generators: '{dataset_dir}/train' not found — "
+            f"falling back to '{processed}'"
         )
+        dataset_dir = processed
 
-    # Legacy: single-directory with validation_split
-    logger.warning(
-        "build_data_generators() called with a single root directory and "
-        "validation_split. Prefer build_generators(processed_dir) with a "
-        "pre-split layout."
-    )
-    train_datagen = build_train_datagen()
-    from tensorflow.keras.preprocessing.image import ImageDataGenerator
-    val_datagen = ImageDataGenerator(
-        rescale=1.0 / 255.0,
-        validation_split=validation_split,
-    )
-    train_datagen_split = build_train_datagen(validation_split=validation_split)
+    cfg = PreprocessConfig(
+        image_size=target_size or DEFAULT_CONFIG.image_size,
+    ) if target_size else DEFAULT_CONFIG
 
-    train_gen = train_datagen_split.flow_from_directory(
-        str(dataset_dir),
-        target_size=(size, size),
+    return build_generators(
+        dataset_dir,
         batch_size=batch_size,
-        class_mode="categorical",
-        subset="training",
+        cfg=cfg,
+        aug_cfg=aug_cfg,
         seed=seed,
-        shuffle=True,
-    )
-    val_gen = val_datagen.flow_from_directory(
-        str(dataset_dir),
-        target_size=(size, size),
-        batch_size=batch_size,
-        class_mode="categorical",
-        subset="validation",
-        seed=seed,
-        shuffle=False,
+        num_workers=num_workers,
     )
 
-    logger.info(
-        f"Data generators built (legacy) | train={train_gen.samples} "
-        f"val={val_gen.samples} batch={batch_size} size={size}"
-    )
-    return train_gen, val_gen
 
-
-# ── Low-level re-exports (kept in this namespace for old imports) ─────────────
-def apply_median_filter(img: np.ndarray, kernel_size: int = 3) -> np.ndarray:
-    """Re-export — see transforms.apply_median_filter."""
-    return _median(img, kernel_size)
-
-
-def apply_clahe(img_bgr: np.ndarray, clip_limit: float = 2.0) -> np.ndarray:
-    """Re-export — see transforms.apply_clahe."""
-    return _clahe(img_bgr, clip_limit)
-
-
-def resize_image(img: np.ndarray, size: int) -> np.ndarray:
-    """Re-export — see transforms.resize_image."""
-    return _resize(img, size)
-
-
-def normalize_image(img: np.ndarray) -> np.ndarray:
-    """Re-export — see transforms.normalize_image (uses DEFAULT_CONFIG means/stds)."""
-    return _normalize(
-        img,
-        mean=DEFAULT_CONFIG.norm_mean,
-        std=DEFAULT_CONFIG.norm_std,
-    )
+# ── Expose legacy low-level shims used elsewhere ──────────────────────────────
+normalize_image       = _normalize
+apply_median_filter   = _median
+apply_clahe_transform = _clahe   # renamed to avoid shadowing cv2 clahe
+resize_image          = _resize

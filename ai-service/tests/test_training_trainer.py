@@ -18,11 +18,12 @@ Tests
 
 from __future__ import annotations
 
-import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
+import torch.nn as nn
 
 from training.config import TrainingConfig
 from training.trainer import Trainer, train, _build_arg_parser
@@ -38,45 +39,24 @@ def _make_cfg(tmp_path: Path, arch: str = "cnn") -> TrainingConfig:
         architecture=arch,
         epochs=1,
         batch_size=4,
-        fine_tune=False,           # keep tests fast
+        fine_tune=False,
         output_dir=str(tmp_path / "output"),
         dataset_dir=str(tmp_path / "data"),
     )
 
 
-def _fake_generator(n_classes: int = 4, n_samples: int = 8):
-    """Return a MagicMock that looks like a Keras DirectoryIterator."""
-    gen = MagicMock()
-    gen.samples = n_samples
-    gen.class_indices = {
-        "glioma": 0, "meningioma": 1, "notumor": 2, "pituitary": 3
+def _fake_model() -> nn.Module:
+    """Return a tiny PyTorch model (no GPU / real weights needed)."""
+    return nn.Sequential(nn.Flatten(), nn.Linear(4 * 4, 4))
+
+
+def _fake_history(n_epochs: int = 2) -> dict:
+    return {
+        "loss":         [0.5] * n_epochs,
+        "accuracy":     [0.6] * n_epochs,
+        "val_loss":     [0.4] * n_epochs,
+        "val_accuracy": [0.7] * n_epochs,
     }
-    return gen
-
-
-def _fake_model():
-    """Return a MagicMock that mimics tf.keras.Model.fit output."""
-    import tensorflow as tf
-
-    # Build an actual tiny model so save / load work without deep stubs
-    model = tf.keras.Sequential([
-        tf.keras.layers.Flatten(input_shape=(4, 4, 1)),
-        tf.keras.layers.Dense(4, activation="softmax"),
-    ])
-    model.compile("adam", "categorical_crossentropy", metrics=["accuracy"])
-    return model
-
-
-def _fake_history(n_epochs: int = 2):
-    """Return a MagicMock with a .history attribute."""
-    hist = MagicMock()
-    hist.history = {
-        "loss":          [0.5] * n_epochs,
-        "accuracy":      [0.6] * n_epochs,
-        "val_loss":      [0.4] * n_epochs,
-        "val_accuracy":  [0.7] * n_epochs,
-    }
-    return hist
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,12 +76,10 @@ class TestTrainerInit:
         assert "cnn" in trainer.experiment_id
 
     def test_experiment_saved_to_disk_on_init(self, tmp_path):
-        cfg     = _make_cfg(tmp_path)
+        cfg      = _make_cfg(tmp_path)
         exps_dir = tmp_path / "exps"
         trainer  = Trainer(cfg, experiments_dir=exps_dir)
-        exp_file = (
-            exps_dir / trainer.experiment_id / "experiment.json"
-        )
+        exp_file = exps_dir / trainer.experiment_id / "experiment.json"
         assert exp_file.exists()
 
 
@@ -110,27 +88,18 @@ class TestTrainerInit:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestTrainerRun:
-    """
-    We patch the heavy steps (data loading, model build/fit, save, evaluate)
-    so the test runs instantly without a GPU or real dataset.
-    """
-
     def _patch_trainer(self, tmp_path: Path, arch: str = "cnn"):
         """Return a Trainer with all expensive methods stubbed out."""
-        cfg       = _make_cfg(tmp_path, arch=arch)
-        exps_dir  = tmp_path / "exps"
-        trainer   = Trainer(cfg, experiments_dir=exps_dir)
+        cfg      = _make_cfg(tmp_path, arch=arch)
+        exps_dir = tmp_path / "exps"
+        trainer  = Trainer(cfg, experiments_dir=exps_dir)
 
-        fake_model   = _fake_model()
-        train_gen    = _fake_generator()
-        val_gen      = _fake_generator(n_samples=4)
-        fake_hist    = _fake_history()
-        fake_paths   = {
+        fake_paths = {
             "model_dir":  str(tmp_path / "output" / arch),
-            "model_path": str(tmp_path / "output" / arch / "saved_model.pb"),
-            "h5_path":    str(tmp_path / "output" / arch / f"{arch}.h5"),
+            "model_path": str(tmp_path / "output" / arch / "weights.pt"),
+            "h5_path":    "",
             "info_path":  str(tmp_path / "output" / arch / "model_info.json"),
-            "format":     "tf",
+            "format":     "pt",
         }
         fake_metrics = {
             "accuracy": 0.9, "f1": 0.88,
@@ -143,13 +112,19 @@ class TestTrainerRun:
             "model_info": {},
         }
 
-        trainer.model = fake_model
+        trainer.model = _fake_model()
 
-        trainer._build_generators = MagicMock(return_value=(train_gen, val_gen))
+        # Mock all heavy internal steps
+        train_loader = MagicMock()
+        val_loader   = MagicMock()
+        train_loader.dataset = MagicMock()
+        train_loader.dataset.__len__ = MagicMock(return_value=8)
+        val_loader.dataset   = MagicMock()
+        val_loader.dataset.__len__ = MagicMock(return_value=4)
+
+        trainer._build_generators = MagicMock(return_value=(train_loader, val_loader))
         trainer._build_model      = MagicMock(side_effect=lambda: None)
-        trainer._train_phase1     = MagicMock(
-            return_value=fake_hist.history
-        )
+        trainer._train_phase1     = MagicMock(return_value=_fake_history())
         trainer._train_phase2     = MagicMock(return_value={})
         trainer._save_final_model = MagicMock(return_value=fake_paths)
         trainer._evaluate         = MagicMock(return_value=fake_metrics)
@@ -199,10 +174,8 @@ class TestTrainerRun:
     def test_run_marks_failed_on_exception(self, tmp_path):
         trainer, _, _ = self._patch_trainer(tmp_path)
         trainer._build_generators.side_effect = RuntimeError("boom")
-
         with pytest.raises(RuntimeError):
             trainer.run()
-
         assert trainer.experiment.status == "failed"
         assert "RuntimeError" in trainer.experiment.error
 
@@ -218,8 +191,7 @@ class TestTrainerRun:
 
 class TestBuildGenerators:
     def test_raises_when_dataset_dir_missing(self, tmp_path):
-        cfg = _make_cfg(tmp_path)
-        # dataset_dir points to a non-existent directory
+        cfg     = _make_cfg(tmp_path)
         trainer = Trainer(cfg, experiments_dir=tmp_path / "exps")
         with pytest.raises(FileNotFoundError, match="Dataset directory"):
             trainer._build_generators()
@@ -231,7 +203,6 @@ class TestBuildGenerators:
 
 class TestTrainConvenienceWrapper:
     def test_train_calls_trainer_run(self, tmp_path):
-        """train() should create a Trainer and call run()."""
         fake_result = {"experiment_id": "x", "status": "completed"}
         with patch("training.trainer.Trainer") as MockTrainer:
             instance = MagicMock()
@@ -258,7 +229,6 @@ class TestTrainConvenienceWrapper:
 
             train(architecture="resnet50", epochs=2, experiments_dir=tmp_path)
 
-        # First positional arg to Trainer is a TrainingConfig
         cfg_arg: TrainingConfig = MockTrainer.call_args[0][0]
         assert cfg_arg.architecture == "resnet50"
 
@@ -271,7 +241,7 @@ class TestCLIArgParser:
     def test_defaults(self):
         parser = _build_arg_parser()
         args   = parser.parse_args([])
-        assert args.architecture == "efficientnet"
+        assert args.architecture == "mambavision"
         assert args.epochs       == 30
         assert args.batch_size   == 32
 

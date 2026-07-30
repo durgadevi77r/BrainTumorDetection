@@ -1,8 +1,7 @@
 """
-load_model.py — Keras model loading with an in-memory cache.
+load_model.py — PyTorch model loading with an in-memory cache.
 
-Supports both SavedModel directories and .h5 files written by save_model.py.
-The cache is keyed by model_name so each architecture is loaded only once
+The cache is keyed by model_name so each model is loaded only once
 per process. Call clear_model_cache() between tests or when hot-reloading.
 
 Usage
@@ -18,14 +17,12 @@ import json
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import tensorflow as tf
-
 from app.core.config import settings
 from app.core.logging import logger
 
 # ── In-memory model cache ─────────────────────────────────────────────────────
 # Populated lazily; persists for the lifetime of the process / worker.
-_model_cache: Dict[str, tf.keras.Model] = {}
+_model_cache: Dict[str, Any] = {}
 
 
 def _resolve_model_path(model_name: str) -> Path:
@@ -34,10 +31,7 @@ def _resolve_model_path(model_name: str) -> Path:
 
     Search order
     ------------
-    1. ``saved_models/<model_name>/<model_name>.keras`` — Keras 3 native format
-    2. ``saved_models/<model_name>/``                   — TF SavedModel directory
-    3. ``saved_models/<model_name>.h5``                 — legacy flat HDF5 file
-    4. ``saved_models/<model_name>/<model_name>.h5``    — h5 inside sub-dir
+    1. ``saved_models/<model_name>/`` — Hugging Face model directory (config.json)
 
     Raises
     ------
@@ -46,30 +40,9 @@ def _resolve_model_path(model_name: str) -> Path:
     """
     base: Path = settings.saved_models_dir
 
-    # Option 1 — Keras 3 native .keras file (preferred)
-    keras_nested = base / model_name / f"{model_name}.keras"
-    if keras_nested.is_file():
-        return keras_nested
-
-    # Option 2 — flat .keras file
-    keras_flat = base / f"{model_name}.keras"
-    if keras_flat.is_file():
-        return keras_flat
-
-    # Option 3 — SavedModel directory (contains saved_model.pb)
-    saved_model_dir = base / model_name
-    if saved_model_dir.is_dir() and (saved_model_dir / "saved_model.pb").exists():
-        return saved_model_dir
-
-    # Option 4 — flat .h5 file
-    h5_flat = base / f"{model_name}.h5"
-    if h5_flat.is_file():
-        return h5_flat
-
-    # Option 5 — .h5 nested inside sub-directory
-    h5_nested = base / model_name / f"{model_name}.h5"
-    if h5_nested.is_file():
-        return h5_nested
+    model_dir = base / model_name
+    if model_dir.is_dir() and (model_dir / "config.json").is_file():
+        return model_dir
 
     raise FileNotFoundError(
         f"No saved model found for '{model_name}' in {base}. "
@@ -77,27 +50,26 @@ def _resolve_model_path(model_name: str) -> Path:
     )
 
 
-def load_keras_model(model_name: Optional[str] = None) -> tf.keras.Model:
+def load_keras_model(model_name: Optional[str] = None) -> Any:
     """
-    Load (and cache) a Keras model from the ``saved_models`` directory.
+    Load (and cache) an image classifier from the ``saved_models`` directory.
 
     Parameters
     ----------
     model_name : str | None
-        Architecture key — "cnn" | "vgg16" | "resnet50" | "efficientnet".
         Defaults to ``settings.active_model`` when *None*.
 
     Returns
     -------
-    tf.keras.Model
-        The loaded model, ready for ``model.predict()``.
+    TorchImageClassifier
+        Adapter exposing ``predict(np.ndarray) -> np.ndarray``.
 
     Raises
     ------
     FileNotFoundError
         When no saved weights exist for the requested model.
     RuntimeError
-        When TensorFlow fails to deserialise the model artefact.
+        When the model cannot be deserialised.
     """
     name = (model_name or settings.active_model).lower()
 
@@ -111,32 +83,31 @@ def load_keras_model(model_name: Optional[str] = None) -> tf.keras.Model:
     logger.info(f"Loading model '{name}' from {model_path} …")
 
     # ── Load ──────────────────────────────────────────────────────────────────
+    # Lazy imports: torch and transformers are heavy and not available in
+    # lightweight test environments — only import when actually loading a model.
+    from transformers import AutoModelForImageClassification  # noqa: PLC0415
+    from app.models.mambavision.config import MambaVisionHFConfig  # noqa: PLC0415
+    from app.models.mambavision.predictor import TorchImageClassifier  # noqa: PLC0415
+
+    hf_cfg = MambaVisionHFConfig()
     try:
-        model: tf.keras.Model = tf.keras.models.load_model(str(model_path))
+        model = AutoModelForImageClassification.from_pretrained(
+            str(model_path),
+            trust_remote_code=hf_cfg.trust_remote_code,
+        )
     except Exception as exc:
         raise RuntimeError(
             f"Failed to load model '{name}' from {model_path}: {exc}"
         ) from exc
 
-    # ── Validate input shape ──────────────────────────────────────────────────
-    expected_shape = settings.input_shape  # (H, W, C)
-    try:
-        actual_shape = tuple(model.input_shape[1:])  # strip batch dim
-        if actual_shape != expected_shape:
-            logger.warning(
-                f"Model '{name}' input shape {actual_shape} does not match "
-                f"config shape {expected_shape}. Proceeding — verify your config."
-            )
-    except Exception:
-        pass  # Some Keras 3 models don't expose input_shape at top level
+    wrapped = TorchImageClassifier(model)
 
-    _model_cache[name] = model
-    total_params = model.count_params()
+    _model_cache[name] = wrapped
+    total_params = wrapped.count_params()
     logger.info(
-        f"Model '{name}' loaded and cached | "
-        f"params={total_params:,} input_shape={actual_shape}"
+        f"Model '{name}' loaded and cached | params={total_params:,}"
     )
-    return model
+    return wrapped
 
 
 def get_model_info(model_name: Optional[str] = None) -> Dict[str, Any]:

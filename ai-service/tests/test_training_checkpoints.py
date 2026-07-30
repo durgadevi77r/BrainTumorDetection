@@ -18,7 +18,8 @@ import json
 from pathlib import Path
 
 import pytest
-import tensorflow as tf
+import torch
+import torch.nn as nn
 
 from training.checkpoints import (
     best_weights_path,
@@ -37,11 +38,15 @@ def _cfg(tmp_path: Path, arch: str = "cnn") -> TrainingConfig:
     return TrainingConfig(architecture=arch, output_dir=str(tmp_path))
 
 
+def _tiny_model() -> nn.Module:
+    return nn.Sequential(nn.Linear(4, 4))
+
+
 class TestSaveCheckpointInfo:
     def test_creates_json_file(self, tmp_path):
-        cfg     = _cfg(tmp_path)
-        exp_id  = "exp-save-001"
-        path    = save_checkpoint_info(cfg, exp_id, metrics={"val_accuracy": 0.9})
+        cfg    = _cfg(tmp_path)
+        exp_id = "exp-save-001"
+        path   = save_checkpoint_info(cfg, exp_id, metrics={"val_accuracy": 0.9})
         assert path.exists()
         assert path.suffix == ".json"
 
@@ -51,10 +56,10 @@ class TestSaveCheckpointInfo:
         save_checkpoint_info(cfg, exp_id, metrics={"val_accuracy": 0.85}, epoch=5, phase=1)
         with open(checkpoint_info_path(cfg, exp_id)) as fh:
             data = json.load(fh)
-        assert data["experiment_id"] == exp_id
-        assert data["architecture"]  == "cnn"
-        assert data["phase"]         == 1
-        assert data["epoch"]         == 5
+        assert data["experiment_id"]          == exp_id
+        assert data["architecture"]           == "cnn"
+        assert data["phase"]                  == 1
+        assert data["epoch"]                  == 5
         assert data["metrics"]["val_accuracy"] == pytest.approx(0.85)
 
     def test_config_summary_included(self, tmp_path):
@@ -65,6 +70,14 @@ class TestSaveCheckpointInfo:
             data = json.load(fh)
         assert "config_summary" in data
         assert "learning_rate" in data["config_summary"]
+
+    def test_weights_path_points_to_pt_file(self, tmp_path):
+        cfg    = _cfg(tmp_path)
+        exp_id = "exp-save-004"
+        save_checkpoint_info(cfg, exp_id)
+        with open(checkpoint_info_path(cfg, exp_id)) as fh:
+            data = json.load(fh)
+        assert data["weights_path"].endswith(".pt")
 
 
 class TestLoadCheckpointInfo:
@@ -84,36 +97,41 @@ class TestLoadCheckpointInfo:
 
 class TestLoadBestWeights:
     def test_returns_false_when_no_file(self, tmp_path):
-        cfg   = _cfg(tmp_path)
-        model = tf.keras.Sequential([tf.keras.layers.Dense(4, input_shape=(4,))])
-        model.compile("adam", "mse")
+        cfg    = _cfg(tmp_path)
+        model  = _tiny_model()
         result = load_best_weights(model, cfg, "no-such-exp")
         assert result is False
 
     def test_returns_true_after_saving_weights(self, tmp_path):
         cfg    = _cfg(tmp_path)
         exp_id = "exp-weights-001"
+        model  = _tiny_model()
 
-        # Build a tiny model so we can save real weights
-        model = tf.keras.Sequential([
-            tf.keras.layers.Dense(8, activation="relu", input_shape=(4,)),
-            tf.keras.layers.Dense(4, activation="softmax"),
-        ])
-        model.compile(
-            optimizer="adam",
-            loss="categorical_crossentropy",
-            metrics=["accuracy"],
-        )
-
-        # Ensure the checkpoint directory exists and save weights manually
-        # Keras 3 requires .weights.h5 for save_weights()
+        # Save the state_dict as a proper checkpoint
         wpath = best_weights_path(cfg, exp_id)
         wpath.parent.mkdir(parents=True, exist_ok=True)
-        model.save_weights(str(wpath))
+        torch.save(model.state_dict(), str(wpath))
 
-        # load_best_weights should succeed
         result = load_best_weights(model, cfg, exp_id)
         assert result is True
+
+    def test_loaded_weights_match_saved(self, tmp_path):
+        cfg    = _cfg(tmp_path)
+        exp_id = "exp-weights-002"
+
+        # Create model, set known weights, save
+        model1 = nn.Sequential(nn.Linear(4, 4, bias=False))
+        with torch.no_grad():
+            model1[0].weight.fill_(3.14)
+
+        wpath = best_weights_path(cfg, exp_id)
+        wpath.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model1.state_dict(), str(wpath))
+
+        # Load into a fresh model and verify
+        model2 = nn.Sequential(nn.Linear(4, 4, bias=False))
+        load_best_weights(model2, cfg, exp_id)
+        assert torch.allclose(model2[0].weight, model1[0].weight)
 
 
 class TestListCheckpoints:
@@ -123,10 +141,9 @@ class TestListCheckpoints:
         assert result == []
 
     def test_returns_entries_after_save(self, tmp_path):
-        cfg  = _cfg(tmp_path)
+        cfg = _cfg(tmp_path)
         for exp_id in ["exp-list-001", "exp-list-002"]:
             save_checkpoint_info(cfg, exp_id, metrics={"val_accuracy": 0.8})
-
         entries = list_checkpoints(cfg)
         assert len(entries) == 2
 
@@ -136,7 +153,6 @@ class TestListCheckpoints:
         save_checkpoint_info(cfg, "exp-older", metrics={"val_accuracy": 0.7})
         time.sleep(0.05)
         save_checkpoint_info(cfg, "exp-newer", metrics={"val_accuracy": 0.9})
-
         entries = list_checkpoints(cfg)
         assert entries[0]["experiment_id"] == "exp-newer"
 

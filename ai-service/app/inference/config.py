@@ -26,7 +26,7 @@ from typing import List, Optional
 
 
 # ─── Supported values ─────────────────────────────────────────────────────────
-SUPPORTED_ARCHITECTURES = ("cnn", "vgg16", "resnet50", "efficientnet")
+SUPPORTED_ARCHITECTURES = ("mambavision", "cnn", "vgg16", "resnet50", "efficientnet")
 SUPPORTED_OUTPUT_FORMATS = ("json", "csv", "both")
 
 
@@ -83,7 +83,7 @@ class InferenceConfig:
     """
 
     # ── Model ─────────────────────────────────────────────────────────────────
-    model_name:    str           = "efficientnet"
+    model_name:    str           = "mambavision"
     model_version: Optional[str] = None
 
     # ── Prediction ────────────────────────────────────────────────────────────

@@ -14,14 +14,13 @@ Usage
 
     # Custom experiment
     cfg = TrainingConfig(
-        architecture="resnet50",
-        epochs=50,
+        architecture="mambavision",
+        epochs=30,
         learning_rate=5e-5,
-        dropout_rate=0.4,
     )
 
     # Round-trip through JSON
-    d   = cfg.to_dict()
+    d    = cfg.to_dict()
     cfg2 = TrainingConfig.from_dict(d)
 """
 
@@ -34,7 +33,7 @@ from typing import Dict, List, Optional
 
 
 # ─── Supported architectures ──────────────────────────────────────────────────
-SUPPORTED_ARCHITECTURES = ("cnn", "vgg16", "resnet50", "efficientnet")
+SUPPORTED_ARCHITECTURES = ("mambavision", "cnn", "vgg16", "resnet50", "efficientnet")
 
 # ─── Supported optimisers ─────────────────────────────────────────────────────
 SUPPORTED_OPTIMISERS = ("adam", "sgd", "rmsprop", "adamw")
@@ -48,7 +47,7 @@ class TrainingConfig:
     Model
     -----
     architecture : str
-        One of "cnn" | "vgg16" | "resnet50" | "efficientnet".
+        One of "mambavision" | "cnn" | "vgg16" | "resnet50" | "efficientnet".
     image_size : int
         Spatial resolution fed to the model (H = W).
     num_classes : int
@@ -65,14 +64,14 @@ class TrainingConfig:
     momentum : float
         Momentum for SGD (ignored by Adam / RMSProp).
     weight_decay : float
-        L2 weight-decay coefficient for AdamW (ignored by others).
+        L2 weight-decay coefficient.
 
     Regularisation
     --------------
     dropout_rate : float
         Dropout rate applied in the classification head (0.0 – 1.0).
     l2_reg : float
-        L2 regularisation applied to Dense kernel weights.
+        L2 regularisation (kept for compat; applied via weight_decay).
 
     Training loop
     -------------
@@ -83,30 +82,30 @@ class TrainingConfig:
     seed : int
         Random seed for reproducibility.
     class_weights : dict[str, float] | None
-        Per-class weights for imbalanced datasets.
-        Keys are class names; values are float multipliers.
+        Per-class weight map keyed by class name.
         ``None`` means uniform weighting.
+    num_workers : int
+        DataLoader worker processes.
 
     Transfer learning / fine-tuning
     --------------------------------
     freeze_backbone : bool
-        Freeze the ImageNet backbone during Phase 1.
-        Always True for cnn (no backbone).
+        Freeze the backbone during Phase 1.
     fine_tune : bool
         Run Phase-2 after Phase-1 converges.
     fine_tune_layers : int
-        Number of backbone layers to unfreeze in Phase 2.
+        Number of backbone modules to unfreeze in Phase 2.
     fine_tune_epochs : int
         Max epochs for Phase 2.
     fine_tune_lr : float | None
         Phase-2 learning rate.  Defaults to ``learning_rate / 10``.
 
-    Callbacks
-    ---------
+    Callbacks / scheduling
+    ----------------------
     early_stopping_patience : int
         EarlyStopping patience (epochs without improvement).
     early_stopping_monitor : str
-        Metric to monitor for early stopping.
+        Metric to monitor (currently only "val_loss" is used).
     reduce_lr_patience : int
         ReduceLROnPlateau patience.
     reduce_lr_factor : float
@@ -114,7 +113,7 @@ class TrainingConfig:
     reduce_lr_min : float
         Minimum LR floor.
     csv_log : bool
-        Write per-epoch CSV logs alongside TensorBoard events.
+        Write per-epoch CSV logs to disk.
 
     Paths
     -----
@@ -122,14 +121,14 @@ class TrainingConfig:
         Root of the processed (split) dataset.
         Defaults to ``settings.dataset_processed_dir``.
     output_dir : str | None
-        Root for saved models, checkpoints, and experiment logs.
+        Root for saved models and checkpoints.
         Defaults to ``settings.saved_models_dir``.
     """
 
     # ── Model ──────────────────────────────────────────────────────────────────
-    architecture: str  = "efficientnet"
-    image_size:   int  = 224
-    num_classes:  int  = 4
+    architecture: str       = "mambavision"
+    image_size:   int       = 224
+    num_classes:  int       = 4
     class_names:  List[str] = field(
         default_factory=lambda: ["glioma", "meningioma", "notumor", "pituitary"]
     )
@@ -148,16 +147,17 @@ class TrainingConfig:
     epochs:        int  = 30
     batch_size:    int  = 32
     seed:          int  = 42
+    num_workers:   int  = 0
     class_weights: Optional[Dict[str, float]] = None
 
     # ── Transfer learning / fine-tuning ───────────────────────────────────────
-    freeze_backbone:    bool           = True
-    fine_tune:          bool           = True
-    fine_tune_layers:   int            = 20
-    fine_tune_epochs:   int            = 10
-    fine_tune_lr:       Optional[float] = None   # None → learning_rate / 10
+    freeze_backbone:  bool            = True
+    fine_tune:        bool            = True
+    fine_tune_layers: int             = 20
+    fine_tune_epochs: int             = 10
+    fine_tune_lr:     Optional[float] = None   # None → learning_rate / 10
 
-    # ── Callbacks ─────────────────────────────────────────────────────────────
+    # ── Callbacks / scheduling ────────────────────────────────────────────────
     early_stopping_patience: int   = 10
     early_stopping_monitor:  str   = "val_loss"
     reduce_lr_patience:      int   = 5
@@ -203,7 +203,7 @@ class TrainingConfig:
     @property
     def class_weight_map(self) -> Optional[Dict[int, float]]:
         """
-        Convert {class_name: weight} → {class_index: weight} as expected by Keras.
+        Convert {class_name: weight} → {class_index: weight}.
 
         Returns None when class_weights is not set.
         """
@@ -232,7 +232,6 @@ class TrainingConfig:
     def to_dict(self) -> dict:
         """Serialise to a plain JSON-safe dict."""
         d = asdict(self)
-        # Paths serialise as strings
         if d.get("dataset_dir") and isinstance(d["dataset_dir"], Path):
             d["dataset_dir"] = str(d["dataset_dir"])
         if d.get("output_dir") and isinstance(d["output_dir"], Path):
@@ -242,18 +241,16 @@ class TrainingConfig:
     @classmethod
     def from_dict(cls, d: dict) -> "TrainingConfig":
         """Deserialise from a plain dict (e.g. loaded from JSON)."""
-        known = {f.name for f in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
+        known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         filtered = {k: v for k, v in d.items() if k in known}
         return cls(**filtered)
 
     @classmethod
     def from_json(cls, path: str | Path) -> "TrainingConfig":
-        """Load a TrainingConfig from a JSON file."""
         with open(path, "r", encoding="utf-8") as fh:
             return cls.from_dict(json.load(fh))
 
     def save_json(self, path: str | Path) -> None:
-        """Write the config to a JSON file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
