@@ -89,6 +89,11 @@ class Settings(BaseSettings):
     # ── Grad-CAM output ───────────────────────────────────────────────────────
     gradcam_output_dir: Path = BASE_DIR / "gradcam_output"
 
+    @property
+    def gradcam_mambavision_dir(self) -> Path:
+        """Dedicated output directory for MambaVision Grad-CAM artefacts."""
+        return self.saved_models_dir / "mambavision" / "gradcam"
+
     # ── Security / JWT ────────────────────────────────────────────────────────
     # Secret key for JWT signing — override with a strong random value in prod.
     jwt_secret_key: str = "change-me-in-production-use-a-long-random-secret"
@@ -148,4 +153,5 @@ settings.log_dir.mkdir(parents=True, exist_ok=True)
 settings.dataset_raw_dir.mkdir(parents=True, exist_ok=True)
 settings.dataset_processed_dir.mkdir(parents=True, exist_ok=True)
 settings.gradcam_output_dir.mkdir(parents=True, exist_ok=True)
+settings.gradcam_mambavision_dir.mkdir(parents=True, exist_ok=True)
 settings.audit_log_dir.mkdir(parents=True, exist_ok=True)

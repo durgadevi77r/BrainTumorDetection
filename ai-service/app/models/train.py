@@ -63,9 +63,21 @@ def _run_epoch(
     device: torch.device,
     *,
     training: bool,
+    amp_enabled: bool = False,
+    scaler: Optional["torch.cuda.amp.GradScaler"] = None,
+    clip_norm: float = 0.0,
 ) -> tuple[float, float]:
     """
     Run one epoch of training or evaluation.
+
+    Parameters
+    ----------
+    amp_enabled : bool
+        Enable AMP autocast (CUDA only; silently ignored on CPU).
+    scaler : GradScaler | None
+        AMP gradient scaler.  Required when ``amp_enabled=True``.
+    clip_norm : float
+        Max gradient norm for gradient clipping (0.0 = disabled).
 
     Returns
     -------
@@ -86,15 +98,25 @@ def _run_epoch(
             if training and optimizer is not None:
                 optimizer.zero_grad(set_to_none=True)
 
-            outputs = model(images)
-            # HF models return an object with .logits; raw models return a tensor
-            logits = outputs.logits if hasattr(outputs, "logits") else outputs
-
-            loss = criterion(logits, labels)
+            with torch.autocast(device_type=device.type, enabled=amp_enabled):
+                outputs = model(images)
+                # HF models return an object with .logits; raw models return a tensor
+                logits = outputs.logits if hasattr(outputs, "logits") else outputs
+                loss = criterion(logits, labels)
 
             if training and optimizer is not None:
-                loss.backward()
-                optimizer.step()
+                if amp_enabled and scaler is not None:
+                    scaler.scale(loss).backward()
+                    if clip_norm > 0.0:
+                        scaler.unscale_(optimizer)
+                        nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    if clip_norm > 0.0:
+                        nn.utils.clip_grad_norm_(model.parameters(), max_norm=clip_norm)
+                    optimizer.step()
 
             total_loss += loss.item() * images.size(0)
             preds       = logits.argmax(dim=1)
@@ -263,6 +285,8 @@ def train_model(
         device=device,
         model_name=name,
         phase=1,
+        use_amp=True,
+        grad_clip_max_norm=1.0,
     )
 
     metrics_p1 = _extract_final_metrics(history_p1)
@@ -310,6 +334,8 @@ def train_model(
             device=device,
             model_name=name,
             phase=2,
+            use_amp=True,
+            grad_clip_max_norm=1.0,
         )
 
         metrics_p2 = _extract_final_metrics(history_p2)
@@ -385,9 +411,18 @@ def _train_loop(
     device: torch.device,
     model_name: str,
     phase: int,
+    use_amp: bool = False,
+    grad_clip_max_norm: float = 0.0,
 ) -> tuple[Dict[str, List[float]], int]:
     """
     Run the training loop for one phase.
+
+    Parameters
+    ----------
+    use_amp : bool
+        Enable mixed-precision training (CUDA only; silently disabled on CPU).
+    grad_clip_max_norm : float
+        Max gradient norm (0.0 = disabled).
 
     Returns
     -------
@@ -395,6 +430,12 @@ def _train_loop(
         (history_dict, epochs_run)
         history_dict keys: "loss", "accuracy", "val_loss", "val_accuracy"
     """
+    # AMP: only meaningful on CUDA; silently disabled on CPU
+    amp_enabled = use_amp and device.type == "cuda"
+    scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
+    if amp_enabled:
+        logger.info(f"[Phase {phase}] AMP enabled (GradScaler active)")
+
     history: Dict[str, List[float]] = {
         "loss":         [],
         "accuracy":     [],
@@ -408,10 +449,15 @@ def _train_loop(
 
     for epoch in range(1, max_epochs + 1):
         train_loss, train_acc = _run_epoch(
-            model, train_loader, criterion, optimizer, device, training=True
+            model, train_loader, criterion, optimizer, device,
+            training=True,
+            amp_enabled=amp_enabled,
+            scaler=scaler,
+            clip_norm=grad_clip_max_norm,
         )
         val_loss, val_acc = _run_epoch(
-            model, val_loader, criterion, None, device, training=False
+            model, val_loader, criterion, None, device,
+            training=False,
         )
 
         history["loss"].append(train_loss)

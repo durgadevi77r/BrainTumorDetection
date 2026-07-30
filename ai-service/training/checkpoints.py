@@ -124,6 +124,12 @@ def load_best_weights(
     """
     Load ``best_weights.pt`` into *model* in-place.
 
+    Handles both checkpoint formats:
+    - **Full checkpoint** (written by ``_BestCheckpointSaver``): a dict
+      containing ``"model_state"`` plus optimizer/scheduler state and
+      metadata.  Only the model weights are restored here.
+    - **Legacy format**: a plain ``state_dict`` at the top level.
+
     Parameters
     ----------
     model : nn.Module
@@ -145,12 +151,24 @@ def load_best_weights(
 
     map_loc = device or torch.device("cpu")
     try:
-        state = torch.load(str(path), map_location=map_loc, weights_only=True)
-        model.load_state_dict(state)
+        # weights_only=False is required for full checkpoints that contain
+        # non-tensor values (strings, dicts, etc.)
+        ckpt = torch.load(str(path), map_location=map_loc, weights_only=False)
+    except Exception as exc:
+        logger.error(f"Failed to load checkpoint from {path}: {exc}")
+        return False
+
+    try:
+        # Full checkpoint format: {"model_state": OrderedDict, ...}
+        if isinstance(ckpt, dict) and "model_state" in ckpt:
+            model.load_state_dict(ckpt["model_state"])
+        else:
+            # Legacy: plain state_dict at top level
+            model.load_state_dict(ckpt)
         logger.info(f"Best weights loaded from {path}")
         return True
     except Exception as exc:
-        logger.error(f"Failed to load checkpoint from {path}: {exc}")
+        logger.error(f"Failed to restore model weights from {path}: {exc}")
         return False
 
 

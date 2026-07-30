@@ -112,8 +112,18 @@ class TrainingConfig:
         LR reduction factor.
     reduce_lr_min : float
         Minimum LR floor.
+    scheduler : str
+        LR scheduler type: "reduce_on_plateau" | "cosine".
+    cosine_t_max : int
+        CosineAnnealingLR period in epochs (0 = auto-set to cfg.epochs).
+    cosine_eta_min : float
+        CosineAnnealingLR minimum LR.
     csv_log : bool
         Write per-epoch CSV logs to disk.
+    use_amp : bool
+        Enable mixed-precision training (CUDA only; auto-disabled on CPU).
+    grad_clip_max_norm : float
+        Maximum gradient norm for gradient clipping (0.0 = disabled).
 
     Paths
     -----
@@ -163,7 +173,18 @@ class TrainingConfig:
     reduce_lr_patience:      int   = 5
     reduce_lr_factor:        float = 0.5
     reduce_lr_min:           float = 1e-7
+    # Scheduler type: "reduce_on_plateau" | "cosine"
+    scheduler:               str   = "reduce_on_plateau"
+    # Cosine annealing: minimum LR at the bottom of each cycle
+    cosine_t_max:            int   = 0      # 0 → auto-set to cfg.epochs
+    cosine_eta_min:          float = 1e-7
     csv_log:                 bool  = True
+
+    # ── AMP / gradient clipping ───────────────────────────────────────────────
+    # Mixed precision training (CUDA only; silently disabled on CPU).
+    use_amp:              bool  = True
+    # Max gradient norm for gradient clipping (0.0 = disabled).
+    grad_clip_max_norm:   float = 1.0
 
     # ── Paths (None → settings defaults) ─────────────────────────────────────
     dataset_dir: Optional[str] = None
@@ -195,10 +216,27 @@ class TrainingConfig:
         if self.batch_size < 1:
             raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
 
+        valid_schedulers = ("reduce_on_plateau", "cosine")
+        if self.scheduler not in valid_schedulers:
+            raise ValueError(
+                f"scheduler must be one of {valid_schedulers}, got '{self.scheduler}'"
+            )
+
+        if self.grad_clip_max_norm < 0.0:
+            raise ValueError(
+                f"grad_clip_max_norm must be >= 0.0 (0 = disabled), "
+                f"got {self.grad_clip_max_norm}"
+            )
+
     @property
     def effective_fine_tune_lr(self) -> float:
         """Phase-2 LR (defaults to Phase-1 LR ÷ 10)."""
         return self.fine_tune_lr if self.fine_tune_lr is not None else self.learning_rate / 10
+
+    @property
+    def effective_cosine_t_max(self) -> int:
+        """CosineAnnealingLR T_max — defaults to cfg.epochs when set to 0."""
+        return self.cosine_t_max if self.cosine_t_max > 0 else self.epochs
 
     @property
     def class_weight_map(self) -> Optional[Dict[int, float]]:

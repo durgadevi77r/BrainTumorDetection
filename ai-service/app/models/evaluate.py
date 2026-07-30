@@ -5,10 +5,24 @@ Computes the full set of classification metrics using scikit-learn,
 then returns them in a structured dict that maps directly to the
 EvaluateResponse Pydantic schema in routes.py.
 
+When ``output_dir`` is provided the function delegates to
+``evaluation.EvaluationPipeline``, which additionally generates every
+evaluation artifact (confusion-matrix PNG, ROC-curve PNG, classification
+reports, metrics summary, evaluation log) and writes them to that directory.
+
 Usage
 -----
     from app.models.evaluate import evaluate_model
+
+    # Lightweight — metrics only (default, API-compatible)
     metrics = evaluate_model("mambavision")
+
+    # Full pipeline — metrics + all artifacts saved to disk
+    result = evaluate_model(
+        "mambavision",
+        output_dir="saved_models/mambavision/evaluation",
+    )
+    # result["artifact_paths"] → dict of {name: path}
 """
 
 from __future__ import annotations
@@ -38,6 +52,10 @@ def evaluate_model(
     model_name: Optional[str] = None,
     dataset_dir: Optional[str] = None,
     batch_size: int = 32,
+    *,
+    output_dir: Optional[str | Path] = None,
+    save_artifacts: bool = True,
+    use_amp: bool = True,
 ) -> Dict[str, Any]:
     """
     Evaluate a trained model against a test split and return metrics.
@@ -46,32 +64,62 @@ def evaluate_model(
     dataset (one sub-folder per class).  The DataLoader iterates without
     augmentation and without shuffling.
 
+    When ``output_dir`` is provided the full ``evaluation.EvaluationPipeline``
+    is used, which additionally generates every artifact and writes them to
+    that directory.
+
     Parameters
     ----------
     model_name : str | None
         Architecture key. Falls back to ``settings.active_model``.
     dataset_dir : str | None
-        Root of the test/evaluation dataset. Defaults to
-        ``settings.dataset_raw_dir``.
+        Root of the test/evaluation dataset.  Defaults to
+        ``settings.dataset_processed_dir / "test"``.
     batch_size : int
         Batch size for the evaluation loop.
+    output_dir : str | Path | None
+        When provided, switch to the full evaluation pipeline and save
+        artifacts (confusion matrix, ROC curve, reports, summary) here.
+        Defaults to ``None`` (metrics-only, API-compatible mode).
+    save_artifacts : bool
+        Only used when ``output_dir`` is set.  Set to ``False`` to run the
+        full pipeline without writing artifacts to disk.
+    use_amp : bool
+        Enable AMP autocast during inference (CUDA only).
+        Only used when ``output_dir`` is set.
 
     Returns
     -------
     dict
-        {
-          "model_name":       str,
-          "accuracy":         float,
-          "precision":        float,   # macro-averaged
-          "recall":           float,   # macro-averaged
-          "f1":               float,   # macro-averaged
-          "auc_roc":          float,   # macro OvR
-          "confusion_matrix": [[int, ...], ...],
-          "per_class":        {label: {"precision", "recall", "f1", "support"}, ...},
-          "num_samples":      int,
-          "class_names":      [str, ...],
-          "model_info":       dict,    # from model_info.json
-        }
+        Metrics-only mode (``output_dir=None``):
+            {
+              "model_name":       str,
+              "accuracy":         float,
+              "precision":        float,   # macro-averaged
+              "recall":           float,   # macro-averaged
+              "f1":               float,   # macro-averaged
+              "auc_roc":          float,   # macro OvR
+              "confusion_matrix": [[int, ...], ...],
+              "per_class":        {label: {precision, recall, f1, support}, ...},
+              "num_samples":      int,
+              "class_names":      [str, ...],
+              "model_info":       dict,
+            }
+
+        Full-pipeline mode (``output_dir`` provided):
+            All of the above, plus:
+            {
+              "artifact_paths":  {artifact_name: path_str, ...},
+              "checkpoint_meta": dict,
+              "duration_s":      float,
+              "precision_macro":    float,
+              "precision_weighted": float,
+              "recall_macro":       float,
+              "recall_weighted":    float,
+              "f1_macro":           float,
+              "f1_weighted":        float,
+              "per_class_accuracy": {class_name: float, ...},
+            }
 
     Raises
     ------
@@ -80,16 +128,31 @@ def evaluate_model(
     ValueError
         When no images are found in the dataset directory.
     """
+    # ── Full pipeline mode ─────────────────────────────────────────────────────
+    if output_dir is not None:
+        return _run_full_pipeline(
+            model_name=model_name,
+            dataset_dir=dataset_dir,
+            batch_size=batch_size,
+            output_dir=Path(output_dir),
+            save_artifacts=save_artifacts,
+            use_amp=use_amp,
+        )
+
+    # ── Lightweight API-compatible mode (original implementation) ─────────────
     name     = (model_name or settings.active_model).lower()
-    data_dir = Path(dataset_dir) if dataset_dir else settings.dataset_raw_dir
+    data_dir = (
+        Path(dataset_dir) if dataset_dir
+        else settings.dataset_processed_dir / "test"
+    )
     classes  = settings.classes
 
     logger.info(f"Evaluation started | model={name} dataset={data_dir}")
 
-    # ── Load model (cached TorchImageClassifier) ──────────────────────────────
+    # Load model (cached TorchImageClassifier)
     wrapped = load_keras_model(name)
 
-    # ── Build test DataLoader ─────────────────────────────────────────────────
+    # Build test DataLoader
     test_loader = build_test_generator(
         data_dir,
         batch_size=batch_size,
@@ -103,21 +166,14 @@ def evaluate_model(
             "Ensure the dataset directory contains class sub-folders."
         )
 
-    # ── Run predictions ───────────────────────────────────────────────────────
     logger.info(f"Running predictions on {num_samples} test samples …")
 
     all_probs:  List[np.ndarray] = []
     all_labels: List[int]        = []
 
     for images, labels in test_loader:
-        # images: torch.Tensor (N, C, H, W) float32 — already normalised
-        # labels: torch.Tensor (N,) int64
-
-        # TorchImageClassifier.predict() expects NHWC float32 in [0,1].
-        # The DataLoader gives us NCHW float32 normalised.
-        # We need to pass the raw tensor directly through the model instead.
-        device  = wrapped.device
-        images  = images.to(device, non_blocking=True)
+        device = wrapped.device
+        images = images.to(device, non_blocking=True)
 
         with torch.inference_mode():
             out    = wrapped.model(images)
@@ -127,15 +183,16 @@ def evaluate_model(
         all_probs.append(probs.cpu().numpy().astype(np.float32))
         all_labels.extend(labels.numpy().tolist())
 
-    raw_preds: np.ndarray = np.concatenate(all_probs, axis=0)   # (N, num_classes)
+    raw_preds:  np.ndarray = np.concatenate(all_probs, axis=0)
     y_true_raw: np.ndarray = np.array(all_labels, dtype=np.int64)
 
-    # ── Map dataset class indices → canonical class order ─────────────────────
-    dataset     = test_loader.dataset
-    gen_classes: List[str]       = getattr(dataset, "classes", classes)
-    gen_class_map: Dict[str, int] = getattr(dataset, "class_indices", {})
+    # Map dataset class indices → canonical class order
+    dataset       = test_loader.dataset
+    gen_class_map: Dict[str, int] = getattr(
+        dataset, "class_to_idx",
+        getattr(dataset, "class_indices", {}),
+    )
 
-    # Build remapping: dataset_index → canonical_index
     canonical_map: Dict[int, int] = {}
     col_order: List[int] = []
     for cls in classes:
@@ -149,19 +206,13 @@ def evaluate_model(
         [canonical_map.get(int(i), int(i)) for i in y_true_raw],
         dtype=np.int64,
     )
-    y_pred_indices = np.argmax(raw_preds, axis=1)
     y_pred = np.array(
-        [canonical_map.get(int(i), int(i)) for i in y_pred_indices],
+        [canonical_map.get(int(i), int(i)) for i in np.argmax(raw_preds, axis=1)],
         dtype=np.int64,
     )
+    probs_canonical = raw_preds[:, col_order] if col_order else raw_preds
 
-    # Reorder probability columns to match canonical class order
-    if col_order:
-        probs_canonical = raw_preds[:, col_order]
-    else:
-        probs_canonical = raw_preds
-
-    # ── Scalar metrics ────────────────────────────────────────────────────────
+    # Scalar metrics
     accuracy  = float(accuracy_score(y_true, y_pred))
     precision = float(precision_score(y_true, y_pred, average="macro", zero_division=0))
     recall    = float(recall_score(y_true, y_pred, average="macro", zero_division=0))
@@ -175,11 +226,9 @@ def evaluate_model(
         logger.warning(f"AUC-ROC computation failed: {exc}")
         auc_roc = 0.0
 
-    # ── Confusion matrix ──────────────────────────────────────────────────────
     cm: np.ndarray   = confusion_matrix(y_true, y_pred, labels=list(range(len(classes))))
     cm_list: List[List[int]] = cm.tolist()
 
-    # ── Per-class metrics ──────────────────────────────────────────────────────
     report: Dict[str, Any] = classification_report(
         y_true, y_pred,
         target_names=classes,
@@ -215,3 +264,49 @@ def evaluate_model(
         "class_names":      classes,
         "model_info":       get_model_info(name),
     }
+
+
+# ─── Full pipeline helper ─────────────────────────────────────────────────────
+
+def _run_full_pipeline(
+    *,
+    model_name: Optional[str],
+    dataset_dir: Optional[str],
+    batch_size: int,
+    output_dir: Path,
+    save_artifacts: bool,
+    use_amp: bool,
+) -> Dict[str, Any]:
+    """
+    Delegate to ``evaluation.EvaluationPipeline`` and merge model_info into
+    the result so callers always get the same top-level keys regardless of mode.
+    """
+    from evaluation.evaluator import EvaluationPipeline  # lazy — avoids circular imports
+
+    arch = (model_name or settings.active_model).lower()
+
+    pipeline = EvaluationPipeline(
+        architecture=arch,
+        dataset_dir=dataset_dir,
+        batch_size=batch_size,
+        output_dir=output_dir,
+        use_amp=use_amp,
+    )
+    result = pipeline.run(save_artifacts=save_artifacts)
+
+    # Merge model_info for API compatibility
+    result["model_name"] = arch
+    result["model_info"] = get_model_info(arch)
+
+    # Flatten top-level scalar keys that the API routes expect
+    m = result["metrics"]
+    result.setdefault("accuracy",         m.get("accuracy", 0.0))
+    result.setdefault("precision",        m.get("precision_macro", 0.0))
+    result.setdefault("recall",           m.get("recall_macro", 0.0))
+    result.setdefault("f1",               m.get("f1_macro", 0.0))
+    result.setdefault("auc_roc",          m.get("auc_roc", 0.0))
+    result.setdefault("confusion_matrix", m.get("confusion_matrix", []))
+    result.setdefault("per_class",        m.get("per_class", {}))
+    result.setdefault("num_samples",      m.get("num_samples", 0))
+
+    return result

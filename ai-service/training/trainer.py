@@ -365,12 +365,22 @@ class Trainer:
         max_epochs: int,
         phase: int,
     ) -> tuple[Dict[str, List[float]], int]:
-        """Core epoch loop shared by both phases."""
-        from app.models.train import _run_epoch
+        """Core epoch loop shared by both phases.
 
-        criterion = nn.CrossEntropyLoss(
-            weight=self._class_weight_tensor()
-        )
+        Supports:
+        - Mixed-precision training (AMP) via GradScaler when CUDA is available
+          and ``cfg.use_amp=True``.
+        - Gradient clipping via ``cfg.grad_clip_max_norm`` (0.0 = disabled).
+        """
+        criterion = nn.CrossEntropyLoss(weight=self._class_weight_tensor())
+
+        # AMP: only meaningful on CUDA; silently disabled on CPU
+        amp_enabled = self.cfg.use_amp and self.device.type == "cuda"
+        scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
+        if amp_enabled:
+            logger.info(f"[Phase {phase}] AMP enabled (GradScaler active)")
+
+        clip_norm = self.cfg.grad_clip_max_norm  # 0.0 = disabled
 
         history: Dict[str, List[float]] = {
             "loss": [], "accuracy": [], "val_loss": [], "val_accuracy": []
@@ -378,13 +388,20 @@ class Trainer:
         epochs_run = 0
 
         for epoch in range(1, max_epochs + 1):
-            train_loss, train_acc = _run_epoch(
-                self.model, train_loader, criterion, optimizer,
-                self.device, training=True,
+            # ── Training pass ────────────────────────────────────────────────
+            self.model.train()
+            train_loss, train_acc = self._run_epoch_amp(
+                train_loader, criterion, optimizer,
+                scaler=scaler, amp_enabled=amp_enabled,
+                clip_norm=clip_norm, training=True,
             )
-            val_loss, val_acc = _run_epoch(
-                self.model, val_loader, criterion, None,
-                self.device, training=False,
+
+            # ── Validation pass ──────────────────────────────────────────────
+            self.model.eval()
+            val_loss, val_acc = self._run_epoch_amp(
+                val_loader, criterion, optimizer=None,
+                scaler=scaler, amp_enabled=amp_enabled,
+                clip_norm=0.0, training=False,
             )
 
             history["loss"].append(train_loss)
@@ -414,6 +431,59 @@ class Trainer:
                 break
 
         return history, epochs_run
+
+    def _run_epoch_amp(
+        self,
+        loader: DataLoader,
+        criterion: nn.Module,
+        optimizer: Optional[torch.optim.Optimizer],
+        *,
+        scaler: "torch.cuda.amp.GradScaler",
+        amp_enabled: bool,
+        clip_norm: float,
+        training: bool,
+    ) -> tuple[float, float]:
+        """Run one epoch with optional AMP and gradient clipping."""
+        total_loss = 0.0
+        correct    = 0
+        total      = 0
+
+        ctx = torch.enable_grad() if training else torch.inference_mode()
+        with ctx:
+            for images, labels in loader:
+                images = images.to(self.device, non_blocking=True)
+                labels = labels.to(self.device, non_blocking=True)
+
+                if training and optimizer is not None:
+                    optimizer.zero_grad(set_to_none=True)
+
+                with torch.autocast(
+                    device_type=self.device.type,
+                    enabled=amp_enabled,
+                ):
+                    outputs = self.model(images)
+                    logits = outputs.logits if hasattr(outputs, "logits") else outputs
+                    loss = criterion(logits, labels)
+
+                if training and optimizer is not None:
+                    scaler.scale(loss).backward()
+                    # Unscale before clipping so the norm is meaningful
+                    if clip_norm > 0.0:
+                        scaler.unscale_(optimizer)
+                        nn.utils.clip_grad_norm_(
+                            self.model.parameters(), max_norm=clip_norm
+                        )
+                    scaler.step(optimizer)
+                    scaler.update()
+
+                total_loss += loss.item() * images.size(0)
+                preds       = logits.argmax(dim=1)
+                correct    += (preds == labels).sum().item()
+                total      += images.size(0)
+
+        mean_loss = total_loss / max(total, 1)
+        accuracy  = correct   / max(total, 1)
+        return mean_loss, accuracy
 
     def _class_weight_tensor(self) -> Optional[torch.Tensor]:
         """Build a CrossEntropyLoss weight tensor from cfg.class_weights."""
