@@ -39,7 +39,7 @@ x-logging: &default-logging
 # ─────────────────────────────────────────────────────────────────────────────
 services:
 
-  # ── AI Service — FastAPI / TensorFlow ──────────────────────────────────────
+  # ── AI Service — FastAPI / PyTorch ────────────────────────────────────────
   ai-service:
     <<: [*restart-policy, *default-logging]
     build:

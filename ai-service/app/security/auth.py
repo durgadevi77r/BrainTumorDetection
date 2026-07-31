@@ -4,6 +4,20 @@ app/security/auth.py — User model, in-memory user store, and authentication lo
 For production, replace the in-memory UserStore with a database-backed
 implementation (SQLite / PostgreSQL) following the same interface.
 
+Production startup requirements
+--------------------------------
+The following environment variables MUST be set to non-default values before
+the service will start in ``AI_SERVICE_ENV=production`` mode:
+
+  JWT_SECRET_KEY                — strong random HS256 signing secret
+  DEFAULT_ADMIN_PASSWORD        — replaces the hardcoded "Admin@123!"
+  DEFAULT_RESEARCHER_PASSWORD   — replaces "Research@123!"
+  DEFAULT_OPERATOR_PASSWORD     — replaces "Operator@123!"
+  DEFAULT_VIEWER_PASSWORD       — replaces "Viewer@123!"
+
+If any of the above still hold their placeholder/default values the service
+will raise RuntimeError at startup and refuse to serve requests.
+
 Classes
 -------
 UserInDB        — Full user record including hashed password.
@@ -130,20 +144,66 @@ class UserStore:
     # ── Seeding ───────────────────────────────────────────────────────────────
 
     def _seed_defaults(self) -> None:
-        """Create the built-in accounts on first startup."""
+        """
+        Create the built-in accounts on first startup.
+
+        In development the passwords fall back to the well-known placeholder
+        values defined in ``config.py``.  In production every password MUST
+        be overridden via environment variables
+        (``DEFAULT_ADMIN_PASSWORD``, ``DEFAULT_RESEARCHER_PASSWORD``,
+        ``DEFAULT_OPERATOR_PASSWORD``, ``DEFAULT_VIEWER_PASSWORD``).
+
+        If the service starts in production mode with any password still set to
+        the committed placeholder, startup is aborted immediately — it is far
+        safer to crash loudly than to run with known-weak credentials.
+        """
+        # ── Map each account to its configured password ───────────────────────
         default_users = [
-            # (username, email, password, role)
-            ("admin",      "admin@braintumor.local",      "Admin@123!",      Role.ADMIN),
-            ("researcher", "researcher@braintumor.local", "Research@123!",   Role.RESEARCHER),
-            ("operator",   "operator@braintumor.local",   "Operator@123!",   Role.OPERATOR),
-            ("viewer",     "viewer@braintumor.local",     "Viewer@123!",     Role.VIEWER),
+            # (username, email, password_from_settings, role)
+            ("admin",      "admin@braintumor.local",      settings.default_admin_password,      Role.ADMIN),
+            ("researcher", "researcher@braintumor.local", settings.default_researcher_password, Role.RESEARCHER),
+            ("operator",   "operator@braintumor.local",   settings.default_operator_password,   Role.OPERATOR),
+            ("viewer",     "viewer@braintumor.local",     settings.default_viewer_password,      Role.VIEWER),
         ]
+
+        # ── Production guard ──────────────────────────────────────────────────
+        # The placeholder values that ship in source code / .env.example.
+        _KNOWN_DEFAULTS = {
+            "admin":      "Admin@123!",
+            "researcher": "Research@123!",
+            "operator":   "Operator@123!",
+            "viewer":     "Viewer@123!",
+        }
+        if settings.ai_service_env == "production":
+            weak = [
+                username
+                for username, _, password, _ in default_users
+                if password == _KNOWN_DEFAULTS.get(username)
+            ]
+            if weak:
+                raise RuntimeError(
+                    "PRODUCTION STARTUP BLOCKED: default seed passwords have not been "
+                    f"changed for the following accounts: {weak}. "
+                    "Set DEFAULT_ADMIN_PASSWORD, DEFAULT_RESEARCHER_PASSWORD, "
+                    "DEFAULT_OPERATOR_PASSWORD, and DEFAULT_VIEWER_PASSWORD to "
+                    "strong unique secrets in your production environment before "
+                    "starting the service."
+                )
+
         for username, email, password, role in default_users:
             self._add_user_internal(username, email, password, role)
-        logger.info(
-            f"UserStore seeded with {len(default_users)} default accounts. "
-            "Change default passwords before production deployment."
-        )
+
+        if settings.ai_service_env == "production":
+            logger.info(
+                f"UserStore seeded with {len(default_users)} accounts "
+                "(production passwords verified)."
+            )
+        else:
+            logger.warning(
+                f"UserStore seeded with {len(default_users)} default accounts. "
+                "These accounts use development passwords — "
+                "NEVER use this configuration in production."
+            )
 
     def _add_user_internal(
         self,

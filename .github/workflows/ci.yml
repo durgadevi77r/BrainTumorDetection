@@ -146,12 +146,19 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --upgrade pip
+          # Install PyTorch CPU-only wheel to avoid pulling the full CUDA build (~1.5 GB)
+          # in CI where no GPU is present. All other packages install from PyPI normally.
+          pip install --no-cache-dir \
+            torch==2.4.1 torchvision==0.19.1 \
+            --index-url https://download.pytorch.org/whl/cpu
           pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir -r requirements-dev.txt
 
       - name: Run pytest with coverage
         env:
-          AI_SERVICE_ENV: test
-          BCRYPT_ROUNDS:  "4"
+          AI_SERVICE_ENV:  test
+          BCRYPT_ROUNDS:   "4"
+          ACTIVE_MODEL:    mambavision
         run: |
           pytest \
             --tb=short \

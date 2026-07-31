@@ -8,7 +8,7 @@ Brain Tumour Detection — answers to the most common questions.
 
 **Q: What does this application actually do?**
 
-It classifies MRI brain scans into one of four categories: glioma, meningioma, pituitary tumour, or no tumour. It uses deep learning (EfficientNetB0 by default) trained on labelled MRI image datasets. Grad-CAM heatmaps show which image regions influenced the classification.
+It classifies MRI brain scans into one of four categories: glioma, meningioma, pituitary tumour, or no tumour. It uses deep learning (MambaVision-T by default) trained on labelled MRI image datasets. Grad-CAM heatmaps show which image regions influenced the classification.
 
 ---
 
@@ -26,7 +26,7 @@ JPEG, PNG, BMP, and TIFF. Images are automatically resized to 224×224 pixels du
 
 **Q: How accurate is the model?**
 
-EfficientNetB0 trained on the [Kaggle Brain Tumor MRI Dataset](https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset) typically achieves **97–99% validation accuracy**. Accuracy on out-of-distribution data (different scanner protocols, patient populations, or image quality) will be lower and should be evaluated separately.
+MambaVision-T trained on the [Kaggle Brain Tumor MRI Dataset](https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset) typically achieves **97–99% validation accuracy**. Accuracy on out-of-distribution data (different scanner protocols, patient populations, or image quality) will be lower and should be evaluated separately.
 
 ---
 
@@ -44,7 +44,7 @@ No. The application runs on CPU. A GPU dramatically speeds up training (10–100
 
 **Q: Which Python version is required?**
 
-Python 3.12 is recommended. TensorFlow 2.20 supports Python 3.10–3.13. Python 3.8 and 3.9 are not supported.
+Python 3.12 is recommended. PyTorch 2.4+ supports Python 3.8–3.12. Python 3.13 support may require testing specific PyTorch nightly builds.
 
 **Q: Can I run this on Windows?**
 
@@ -52,8 +52,8 @@ Yes. Docker Desktop works on Windows 10/11. Local development (without Docker) w
 
 **Q: Can I run this on Apple Silicon (M1/M2/M3)?**
 
-Yes, with adjustments:
-1. Use `tensorflow-macos` and `tensorflow-metal` instead of `tensorflow` in `requirements.txt`
+Yes. PyTorch has native Apple Silicon support:
+1. PyTorch will automatically use MPS (Metal Performance Shaders) backend when available
 2. Docker images are built for `linux/amd64` — use Rosetta 2 or rebuild natively with `--platform linux/arm64`
 
 ---
@@ -62,11 +62,11 @@ Yes, with adjustments:
 
 **Q: How long does training take?**
 
-On CPU, 30 epochs of EfficientNetB0 on ~5,700 images takes approximately 45–90 minutes. On a mid-range GPU (RTX 3060), the same run takes about 5–10 minutes. VGG16 takes 2–4× longer than EfficientNet due to its larger parameter count.
+On CPU, 30 epochs of MambaVision-T on ~5,700 images takes approximately 60–120 minutes. On a mid-range GPU (RTX 3060), the same run takes about 8–15 minutes. VGG16 takes 2–4× longer than MambaVision due to its larger parameter count.
 
 **Q: Which model architecture should I use?**
 
-Start with **EfficientNetB0** (the default). It offers the best accuracy-to-speed tradeoff for this task. Use **Custom CNN** for rapid experimentation or very limited hardware. Avoid **VGG16** unless you have a specific reason — it uses 138M parameters and trains slowly.
+Start with **MambaVision-T** (the default). It offers state-of-the-art accuracy using vision Mamba architecture with selective state space models. Use **EfficientNet-B3** for a lighter alternative with excellent accuracy-to-speed tradeoff. Use **Custom CNN** for rapid experimentation or very limited hardware. Avoid **VGG16** unless you have a specific reason — it uses 138M parameters and trains slowly.
 
 **Q: What do the training hyperparameters do?**
 
@@ -80,7 +80,7 @@ Start with **EfficientNetB0** (the default). It offers the best accuracy-to-spee
 
 **Q: Can I resume a failed training job?**
 
-Not automatically. Keras checkpoints save the best weights so far (`best.keras`). After a failure, restart training — it will overwrite the checkpoint only if the new run achieves a better validation accuracy.
+Not automatically. PyTorch checkpoints save the best weights so far (`best.pt` or HuggingFace format). After a failure, restart training — it will overwrite the checkpoint only if the new run achieves a better validation accuracy.
 
 **Q: How do I prevent overfitting?**
 
@@ -96,7 +96,7 @@ Not automatically. Keras checkpoints save the best weights so far (`best.keras`)
 
 **Q: Why is the first prediction slow?**
 
-The first prediction after a service restart loads the model weights from disk into memory (~2–5 seconds for EfficientNet). Subsequent predictions use the LRU model cache and are fast (~45–80ms).
+The first prediction after a service restart loads the model weights from disk into memory (~3–7 seconds for MambaVision). Subsequent predictions use the LRU model cache and are fast (~45–80ms).
 
 **Q: Can the model handle non-MRI images?**
 

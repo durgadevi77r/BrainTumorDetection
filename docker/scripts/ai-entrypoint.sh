@@ -20,7 +20,7 @@ log_error() { echo "[AI-SERVICE] ERROR: $1" >&2; }
 log_info "=== Brain Tumour AI Service — startup ==="
 log_info "Environment : ${AI_SERVICE_ENV:-production}"
 log_info "Port        : ${AI_SERVICE_PORT:-8000}"
-log_info "Active model: ${ACTIVE_MODEL:-efficientnet}"
+log_info "Active model: ${ACTIVE_MODEL:-mambavision}"
 
 # ── Required directory checks ──────────────────────────────────────────────────
 for dir in \
@@ -50,7 +50,7 @@ fi
 
 # ── Python import sanity check ─────────────────────────────────────────────────
 log_info "Running import sanity check..."
-python -c "import fastapi, tensorflow, uvicorn; print('Core imports OK')" \
+python -c "import fastapi, torch, uvicorn; print('Core imports OK')" \
     || { log_error "Core Python imports failed — check requirements installation"; exit 1; }
 
 log_info "Pre-flight checks passed — starting application..."

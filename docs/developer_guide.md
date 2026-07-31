@@ -28,7 +28,7 @@ Brain Tumour Detection — development setup, coding standards, project conventi
 
 ```
 brain-tumor-detection/
-├── ai-service/                       Python / FastAPI / TensorFlow
+├── ai-service/                       Python / FastAPI / PyTorch / MambaVision
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── routes.py             Core endpoints (health, predict, train…)
@@ -56,12 +56,12 @@ brain-tumor-detection/
 │   │   │   ├── storage.py            JSONL time-series storage
 │   │   │   └── dashboard.py          Composite dashboard endpoint
 │   │   ├── models/
-│   │   │   ├── architectures.py      EfficientNet, ResNet50, VGG16, CNN builders
+│   │   │   ├── architectures.py      MambaVision-T, EfficientNet-B3, ResNet50, VGG16, CNN builders
 │   │   │   ├── train.py              Training loop, callbacks, checkpoints
 │   │   │   ├── predict.py            Single-image prediction
 │   │   │   ├── evaluate.py           Test-set evaluation
-│   │   │   ├── load_model.py         Keras model loading + cache
-│   │   │   └── save_model.py         Keras model serialisation
+│   │   │   ├── load_model.py         PyTorch model loading + cache (HF + PT formats)
+│   │   │   └── save_model.py         PyTorch model persistence (HF + state_dict)
 │   │   ├── performance/
 │   │   │   ├── profiler.py           cProfile-based function timer
 │   │   │   ├── benchmark.py          BenchmarkSuite across all modules
@@ -387,40 +387,36 @@ docker compose ps
 Add a builder function to `ai-service/app/models/architectures.py`:
 
 ```python
+import torch.nn as nn
+
 def build_my_model(
-    num_classes: int,
-    input_shape: tuple = (224, 224, 3),
+    num_classes: int = 4,
     dropout_rate: float = 0.3,
-) -> tf.keras.Model:
+) -> nn.Module:
     """
     MyModel — brief description.
 
     Args:
         num_classes: Number of output classes.
-        input_shape: (H, W, C) input dimensions.
         dropout_rate: Dropout regularisation rate.
 
     Returns:
-        Compiled Keras model.
+        Initialised nn.Module (weights are random — load or train before use).
     """
-    inputs = tf.keras.Input(shape=input_shape)
-    # ... build layers ...
-    outputs = tf.keras.layers.Dense(num_classes, activation="softmax")(x)
-    model = tf.keras.Model(inputs, outputs, name="my_model")
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(1e-4),
-        loss="categorical_crossentropy",
-        metrics=["accuracy"],
+    return nn.Sequential(
+        # ... add backbone layers ...
+        nn.Dropout(dropout_rate),
+        nn.Linear(512, num_classes),
     )
-    return model
 ```
 
 ### 2. Register the architecture
 
-In `architectures.py`, add your builder to the `MODEL_REGISTRY` dict:
+In `architectures.py`, add your builder to the `_BUILDERS` dict:
 
 ```python
-MODEL_REGISTRY: Dict[str, Callable] = {
+_BUILDERS: Dict[str, Callable] = {
+    "mambavision": build_mambavision,
     "cnn":          build_cnn,
     "vgg16":        build_vgg16,
     "resnet50":     build_resnet50,
@@ -437,7 +433,7 @@ In `ai-service/app/core/config.py`, add the new name to the allowed set:
 @field_validator("active_model")
 @classmethod
 def validate_model_name(cls, v: str) -> str:
-    allowed = {"cnn", "vgg16", "resnet50", "efficientnet", "my_model"}
+    allowed = {"mambavision", "cnn", "vgg16", "resnet50", "efficientnet", "my_model"}
     ...
 ```
 
@@ -448,7 +444,7 @@ Also update the `TrainRequest.model_name` field description in `routes.py`.
 The `health_check` endpoint in `routes.py` builds `models_available` from a hardcoded list — add the new name:
 
 ```python
-supported = ["cnn", "vgg16", "resnet50", "efficientnet", "my_model"]
+supported = ["mambavision", "cnn", "vgg16", "resnet50", "efficientnet", "my_model"]
 ```
 
 ### 5. Write tests

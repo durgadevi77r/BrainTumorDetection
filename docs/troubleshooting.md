@@ -39,18 +39,7 @@ echo "JWT_SECRET_KEY=$(openssl rand -hex 32)" >> ai-service/.env
 docker compose restart ai-service
 ```
 
-**Cause 2 — TensorFlow import fails:**
-```bash
-docker compose logs ai-service | grep "ImportError"
-docker compose exec ai-service python -c "import tensorflow"
-```
-Fix: Rebuild the image to reinstall dependencies:
-```bash
-docker compose build --no-cache ai-service
-docker compose up -d ai-service
-```
-
-**Cause 3 — Port 8000 already in use:**
+**Cause 2 — Port 8000 already in use:**
 ```bash
 # Linux / macOS
 lsof -i :8000
@@ -70,7 +59,7 @@ docker inspect bt_ai_service | python3 -c \
   "import sys,json; d=json.load(sys.stdin); print(json.dumps(d[0]['State']['Health'], indent=2))"
 ```
 
-The AI service `start_period` is **90 seconds** — TensorFlow needs this time to initialise. Wait before declaring it broken.
+The AI service `start_period` is **30 seconds** — allow this time for the PyTorch/MambaVision model registry to initialise before declaring it broken.
 
 ---
 
@@ -111,7 +100,7 @@ Check `AI_SERVICE_URL` in `backend/.env` — should be `http://ai-service:8000`,
 ```bash
 curl -X POST http://localhost:8000/api/v1/train \
   -H "Content-Type: application/json" \
-  -d '{"model_name": "efficientnet", "epochs": 30}'
+  -d '{"model_name": "mambavision", "epochs": 30}'
 ```
 
 Or check what models are available:
@@ -134,21 +123,8 @@ cat ai-service/logs/$(date +%Y-%m-%d).log
 
 **Common causes:**
 - Missing `.env` file — copy from `.env.example`
-- Invalid `ACTIVE_MODEL` value — must be `cnn`, `vgg16`, `resnet50`, or `efficientnet`
+- Invalid `ACTIVE_MODEL` value — must be one of `mambavision`, `cnn`, `vgg16`, `resnet50`, `efficientnet`
 - `DATASET_RAW_DIR` points to a non-existent path (directories are auto-created but check permissions)
-
----
-
-### TensorFlow / Keras version conflicts
-
-```
-ImportError: cannot import name 'X' from 'keras'
-```
-
-Fix: Ensure the exact versions from `requirements.txt` are installed:
-```bash
-pip install --force-reinstall -r ai-service/requirements.txt
-```
 
 ---
 
@@ -322,14 +298,14 @@ curl -X POST http://localhost:8000/api/v1/dataset/prepare \
 ### Training OOM (Out of Memory)
 
 ```
-ResourceExhaustedError: OOM when allocating tensor
+RuntimeError: CUDA out of memory
 ```
 
 **Fixes:**
 1. Reduce `batch_size` (try 16 or 8)
-2. Use a smaller model (`cnn` instead of `vgg16`)
+2. Use a smaller model (`cnn` instead of `mambavision`)
 3. Reduce `image_size` to 160 or 128 (changes model input shape)
-4. Add GPU swap space: `export TF_GPU_ALLOCATOR=cuda_malloc_async`
+4. Enable PyTorch memory-efficient attention: set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` in `ai-service/.env`
 
 ---
 
@@ -451,21 +427,6 @@ Look for `warning_count > 0` and `operations` with large `delta_mb`.
 ---
 
 ## Build Issues
-
-### `pip install` fails for TensorFlow
-
-TensorFlow 2.20 requires **Python 3.10–3.13**:
-```bash
-python --version    # must be 3.12
-```
-
-On macOS with Apple Silicon:
-```bash
-pip install tensorflow-macos
-# instead of standard tensorflow
-```
-
----
 
 ### `npm ci` fails with peer dependency errors
 

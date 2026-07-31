@@ -30,6 +30,14 @@ secrets:
     file: ./secrets/jwt_secret_key.txt
   db_encryption_key:
     file: ./secrets/db_encryption_key.txt
+  default_admin_password:
+    file: ./secrets/default_admin_password.txt
+  default_researcher_password:
+    file: ./secrets/default_researcher_password.txt
+  default_operator_password:
+    file: ./secrets/default_operator_password.txt
+  default_viewer_password:
+    file: ./secrets/default_viewer_password.txt
 
 services:
 
@@ -38,15 +46,23 @@ services:
     restart: always
     secrets:
       - jwt_secret_key
+      - default_admin_password
+      - default_researcher_password
+      - default_operator_password
+      - default_viewer_password
     environment:
       AI_SERVICE_ENV:    production
       AI_SERVICE_DEBUG:  "false"
       LOG_LEVEL:         INFO
-      # Reference the Docker secret file path
-      JWT_SECRET_KEY_FILE: /run/secrets/jwt_secret_key
+      # Reference the Docker secret file paths
+      JWT_SECRET_KEY_FILE:              /run/secrets/jwt_secret_key
+      DEFAULT_ADMIN_PASSWORD_FILE:      /run/secrets/default_admin_password
+      DEFAULT_RESEARCHER_PASSWORD_FILE: /run/secrets/default_researcher_password
+      DEFAULT_OPERATOR_PASSWORD_FILE:   /run/secrets/default_operator_password
+      DEFAULT_VIEWER_PASSWORD_FILE:     /run/secrets/default_viewer_password
     security_opt:
       - no-new-privileges:true
-    read_only: false       # TF writes to /tmp; set true once verified
+    read_only: false       # PyTorch writes to /tmp; may be settable to true after testing
     tmpfs:
       - /tmp:size=256m,mode=1777
     deploy:

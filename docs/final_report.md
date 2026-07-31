@@ -24,7 +24,7 @@ The project delivers end-to-end functionality: dataset management, image preproc
 | Release type | Stable |
 | License | MIT |
 | Repository | https://github.com/your-org/brain-tumor-detection |
-| Architecture | Three-tier (React / Node.js / FastAPI + TensorFlow) |
+| Architecture | Three-tier (React / Node.js / FastAPI + PyTorch / MambaVision) |
 | Classification task | 4-class MRI brain tumour classification |
 | Classes | Glioma · Meningioma · Pituitary · No Tumour |
 
@@ -63,7 +63,7 @@ Node.js / Express API                         :5000
 └── Proxies AI requests to FastAPI
          │
          ▼
-Python / FastAPI / TensorFlow                 :8000
+Python / FastAPI / PyTorch / MambaVision         :8000
 ├── /api/v1/predict        Inference + Grad-CAM
 ├── /api/v1/train          Sync + async training
 ├── /api/v1/dataset/*      Dataset management
@@ -146,9 +146,10 @@ GHCR (Container registry)
 | **Backend** | Node.js + Express | 20 LTS / 4.21 |
 | **Database** | SQLite (better-sqlite3) | — |
 | **AI Service** | Python + FastAPI | 3.12 / 0.115.5 |
-| **Deep Learning** | TensorFlow / Keras | 2.20 |
+| **Deep Learning** | PyTorch + HuggingFace Transformers | 2.x / 4.x |
+| **Model Architecture** | MambaVision (default) | 1.2 |
 | **Computer Vision** | OpenCV + Pillow | 4.10 / 11.0 |
-| **Explainability** | Grad-CAM (tf-explain) | 0.3.1 |
+| **Explainability** | Grad-CAM (PyTorch native hooks) | — |
 | **Authentication** | JWT (python-jose) + bcrypt | HS256 |
 | **Rate Limiting** | SlowAPI | 0.1.9 |
 | **Container** | Docker + Docker Compose | 24+ / v2 |
@@ -291,7 +292,7 @@ All documentation is located in `docs/` and the repository root.
 
 | Image | Base | Estimated Size |
 |---|---|---|
-| `ai-service` | `python:3.12-slim` + TensorFlow | ~2.8 GB |
+| `ai-service` | `python:3.12-slim` + PyTorch | ~3.5 GB |
 | `backend` | `node:20-alpine` | ~120 MB |
 | `frontend` | `node:20-alpine` → `nginx:alpine` | ~25 MB |
 
@@ -415,7 +416,7 @@ During final verification, the following TypeScript issues were diagnosed and re
 |---|---|---|
 | Backend test suite | Jest configured but no test files created | Add `backend/tests/` with route-level integration tests |
 | Model accuracy | Depends on training data quality and epochs | Integrate MLflow or Weights & Biases for experiment tracking |
-| GPU support | TensorFlow auto-detects GPU if CUDA is present | Add `nvidia/cuda` base image variant for GPU-enabled deployments |
+| GPU support | PyTorch auto-detects CUDA if available | Add `nvidia/cuda` base image variant for GPU-enabled deployments |
 | Authentication UI | JWT auth fully implemented in API | Add login page and session management to the React frontend |
 | Dataset size | Expects the Kaggle Brain Tumour MRI dataset | Document dataset download and preparation steps more explicitly |
 | HTTPS | Nginx config is HTTPS-ready with certificate stubs | Integrate Let's Encrypt / cert-manager for production TLS |
@@ -426,9 +427,10 @@ During final verification, the following TypeScript issues were diagnosed and re
 ## 15. Acknowledgements
 
 - [Brain Tumor MRI Dataset](https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset) (Kaggle) — training data
-- [TensorFlow](https://www.tensorflow.org/) — deep learning framework
+- [PyTorch](https://pytorch.org/) — deep learning framework
+- [HuggingFace Transformers](https://huggingface.co/docs/transformers/) — MambaVision pretrained weights
 - [FastAPI](https://fastapi.tiangolo.com/) — Python web framework
-- [tf-explain](https://tf-explain.readthedocs.io/) — Grad-CAM explainability
+- [Grad-CAM](https://arxiv.org/abs/1610.02391) — Gradient-weighted Class Activation Mapping (PyTorch native hooks)
 - [React](https://react.dev/) + [Vite](https://vitejs.dev/) — frontend toolchain
 - [Contributor Covenant](https://www.contributor-covenant.org/) — Code of Conduct template
 

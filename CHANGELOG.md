@@ -63,11 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Hot-reload endpoint for model updates
 
 - Module 5: Deep Learning Training Framework
-  - EfficientNetB0, ResNet50, VGG16, custom CNN architectures
+  - MambaVision-T (NVIDIA, ImageNet pretrained) as primary architecture with custom classification head
+  - EfficientNet-B3, ResNet50, VGG16, custom CNN as additional architectures (all PyTorch/torchvision)
   - Two-phase fine-tuning (head → backbone)
   - ExperimentRegistry with per-epoch history
   - Async training via FastAPI BackgroundTasks
-  - Checkpointing with best-model save
+  - Checkpointing with best-model save (PyTorch state_dict + HuggingFace formats)
 
 - Module 4: Advanced Image Preprocessing
   - Denoise + CLAHE spatial pipeline

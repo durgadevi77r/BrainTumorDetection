@@ -55,9 +55,10 @@ A healthy response looks like:
   "service": "Brain Tumour Detection AI Service",
   "version": "1.0.0",
   "environment": "development",
-  "active_model": "efficientnet",
+  "active_model": "mambavision",
   "class_names": ["glioma", "meningioma", "notumor", "pituitary"],
   "models_available": {
+    "mambavision": false,
     "cnn": false,
     "vgg16": false,
     "resnet50": false,
@@ -158,7 +159,8 @@ The response includes per-class counts, total images, class weights for imbalanc
 
 1. Go to the **Train** page.
 2. Select a model architecture from the dropdown:
-   - **EfficientNetB0** — best accuracy, recommended default
+   - **MambaVision-T** — state-of-the-art accuracy, recommended default (NVIDIA vision Mamba)
+   - **EfficientNet-B3** — excellent accuracy/speed tradeoff
    - **ResNet50** — good generalisation, higher memory
    - **VGG16** — classic, slowest training
    - **Custom CNN** — fastest, good for experimentation
@@ -176,7 +178,7 @@ The response includes per-class counts, total images, class weights for imbalanc
 curl -X POST http://localhost:8000/api/v1/train \
   -H "Content-Type: application/json" \
   -d '{
-    "model_name":      "efficientnet",
+    "model_name":      "mambavision",
     "epochs":          30,
     "batch_size":      32,
     "learning_rate":   0.0001,
@@ -192,7 +194,7 @@ curl -X POST http://localhost:8000/api/v1/train \
 # 1. Start the job
 curl -X POST http://localhost:8000/api/v1/train/start \
   -H "Content-Type: application/json" \
-  -d '{"model_name": "efficientnet", "epochs": 50}'
+  -d '{"model_name": "mambavision", "epochs": 50}'
 
 # Returns: {"job_id": "abc123", ...}
 
@@ -218,7 +220,7 @@ After training completes:
 ```bash
 curl -X POST http://localhost:8000/api/v1/evaluate \
   -H "Content-Type: application/json" \
-  -d '{"model_name": "efficientnet", "batch_size": 32}'
+  -d '{"model_name": "mambavision", "batch_size": 32}'
 ```
 
 Returns accuracy, loss, and a per-class confusion matrix on the test split.
@@ -257,7 +259,7 @@ curl -X POST http://localhost:8000/api/v1/predict \
       "notumor":     0.0189,
       "pituitary":   0.0076
     },
-    "model_used":   "efficientnet",
+    "model_used":   "mambavision",
     "inference_ms": 47.3,
     "gradcam_b64":  "data:image/png;base64,..."
   }
@@ -520,10 +522,10 @@ See the full [FAQ](faq.md).
 JPEG, PNG, BMP, TIFF. Images are automatically resized to 224×224 pixels.
 
 **Q: How accurate is the model?**
-EfficientNetB0 trained on the Kaggle Brain Tumor MRI Dataset typically achieves 97–99% validation accuracy. Accuracy on your own data will vary.
+MambaVision-T trained on the Kaggle Brain Tumor MRI Dataset typically achieves 97–99% validation accuracy. Accuracy on your own data will vary.
 
 **Q: Can I add my own model architecture?**
 Yes — see the [Developer Guide](developer_guide.md#adding-new-models).
 
 **Q: How do I update the active model?**
-Set `ACTIVE_MODEL` in `ai-service/.env` to `cnn`, `vgg16`, `resnet50`, or `efficientnet`, then restart the service.
+Set `ACTIVE_MODEL` in `ai-service/.env` to `mambavision`, `cnn`, `vgg16`, `resnet50`, or `efficientnet`, then restart the service.

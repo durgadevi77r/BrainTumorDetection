@@ -73,6 +73,12 @@ jobs:
           fi
           echo "environment=$ENV"   >> "$GITHUB_OUTPUT"
           echo "version=$VERSION"   >> "$GITHUB_OUTPUT"
+          # Resolve the target hostname so deploy steps don't hardcode staging
+          if [ "$ENV" = "production" ]; then
+            echo "deploy_host=${{ secrets.DEPLOY_HOST_PRODUCTION }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_host=${{ secrets.DEPLOY_HOST_STAGING }}"    >> "$GITHUB_OUTPUT"
+          fi
           echo "Deploying $VERSION to $ENV"
 
   # ── Deploy ─────────────────────────────────────────────────────────────────
@@ -96,7 +102,7 @@ jobs:
       - name: Copy compose files to server
         uses: appleboy/scp-action@v0.1.7
         with:
-          host:     ${{ secrets.DEPLOY_HOST_STAGING }}
+          host:     ${{ needs.setup.outputs.deploy_host }}
           username: ${{ secrets.DEPLOY_USER }}
           key:      ${{ secrets.DEPLOY_SSH_KEY }}
           source:   "docker/docker-compose.yml,docker/docker-compose.prod.yml,docker/nginx/"
@@ -105,7 +111,7 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host:     ${{ secrets.DEPLOY_HOST_STAGING }}
+          host:     ${{ needs.setup.outputs.deploy_host }}
           username: ${{ secrets.DEPLOY_USER }}
           key:      ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
@@ -135,7 +141,7 @@ jobs:
       - name: Smoke test
         run: |
           sleep 15
-          HOST="${{ secrets.DEPLOY_HOST_STAGING }}"
+          HOST="${{ needs.setup.outputs.deploy_host }}"
           if ! curl -sf "http://${HOST}:8000/api/v1/health" | grep -q '"status":"ok"'; then
             echo "AI service health check failed"
             exit 1

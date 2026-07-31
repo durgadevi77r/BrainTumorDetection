@@ -60,15 +60,16 @@ Liveness probe — returns server metadata and per-model availability.
   "version": "1.0.0",
   "timestamp": "2026-07-14T12:00:00Z",
   "environment": "production",
-  "active_model": "efficientnet",
+  "active_model": "mambavision",
   "class_names": ["glioma", "meningioma", "notumor", "pituitary"],
   "image_size": 224,
   "python_version": "3.12.0",
   "models_available": {
+    "mambavision": true,
     "cnn": false,
-    "vgg16": true,
+    "vgg16": false,
     "resnet50": false,
-    "efficientnet": true
+    "efficientnet": false
   }
 }
 ```
@@ -95,7 +96,7 @@ Run inference on a single MRI image. Returns class probabilities and a Grad-CAM 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `file` | binary | Yes | MRI image file (JPEG, PNG, BMP, TIFF) |
-| `model_name` | string | No | Override active model (`cnn`, `vgg16`, `resnet50`, `efficientnet`) |
+| `model_name` | string | No | Override active model (`mambavision`, `cnn`, `vgg16`, `resnet50`, `efficientnet`) |
 | `include_gradcam` | boolean | No | Include Grad-CAM base64 (default: `true`) |
 
 **Response 200:**
@@ -111,7 +112,7 @@ Run inference on a single MRI image. Returns class probabilities and a Grad-CAM 
       "notumor":    0.0189,
       "pituitary":  0.0076
     },
-    "model_used":   "efficientnet",
+    "model_used":   "mambavision",
     "image_size":   [224, 224],
     "inference_ms": 47.3,
     "gradcam_b64":  "data:image/png;base64,iVBORw0KGgo..."
@@ -206,7 +207,7 @@ Train a model synchronously. Blocks until training completes.
 
 ```json
 {
-  "model_name":       "efficientnet",
+  "model_name":       "mambavision",
   "epochs":           30,
   "batch_size":       32,
   "learning_rate":    0.0001,
@@ -219,7 +220,7 @@ Train a model synchronously. Blocks until training completes.
 
 | Field | Type | Default | Constraints | Description |
 |---|---|---|---|---|
-| `model_name` | string | `"efficientnet"` | `cnn`, `vgg16`, `resnet50`, `efficientnet` | Architecture |
+| `model_name` | string | `"mambavision"` | `mambavision`, `cnn`, `vgg16`, `resnet50`, `efficientnet` | Architecture |
 | `epochs` | int | `30` | 1–500 | Training epochs |
 | `batch_size` | int | `32` | 1–256 | Images per batch |
 | `learning_rate` | float | `0.0001` | (0, 1) | Initial learning rate |
@@ -234,7 +235,7 @@ Train a model synchronously. Blocks until training completes.
   "success": true,
   "message": "Training complete",
   "data": {
-    "model_name":     "efficientnet",
+    "model_name":     "mambavision",
     "epochs_run":     30,
     "best_val_acc":   0.9847,
     "best_val_loss":  0.0512,
@@ -254,7 +255,7 @@ Train a model synchronously. Blocks until training completes.
 curl -X POST http://localhost:8000/api/v1/train \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"model_name": "efficientnet", "epochs": 30, "fine_tune": true}'
+  -d '{"model_name": "mambavision", "epochs": 30, "fine_tune": true}'
 ```
 
 ---
@@ -338,7 +339,7 @@ List all experiment runs.
     "experiments": [
       {
         "experiment_id": "a1b2c3d4-...",
-        "model_name":    "efficientnet",
+        "model_name":    "mambavision",
         "status":        "completed",
         "best_val_acc":  0.9847,
         "epochs_run":    30,
@@ -365,7 +366,7 @@ Get full details for one experiment including per-epoch history.
   "success": true,
   "data": {
     "experiment_id": "a1b2c3d4-...",
-    "model_name":    "efficientnet",
+    "model_name":    "mambavision",
     "config": {
       "epochs": 30, "batch_size": 32, "learning_rate": 0.0001
     },
@@ -395,7 +396,7 @@ Evaluate a trained model on the test dataset split.
 **Request body:**
 ```json
 {
-  "model_name":  "efficientnet",
+  "model_name":  "mambavision",
   "batch_size":  32,
   "dataset_dir": null
 }
@@ -407,7 +408,7 @@ Evaluate a trained model on the test dataset split.
   "success": true,
   "message": "Evaluation complete",
   "data": {
-    "model_name":  "efficientnet",
+    "model_name":  "mambavision",
     "test_acc":    0.9847,
     "test_loss":   0.0512,
     "num_samples": 394,

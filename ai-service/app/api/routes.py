@@ -83,8 +83,8 @@ class PredictionResponse(BaseModel):
 
 class TrainRequest(BaseModel):
     model_name: str = Field(
-        default="efficientnet",
-        description="Architecture to train: cnn | vgg16 | resnet50 | efficientnet",
+        default="mambavision",
+        description="Architecture to train: mambavision | cnn | vgg16 | resnet50 | efficientnet",
     )
     epochs: int          = Field(default=30,    ge=1,   le=500)
     batch_size: int      = Field(default=32,    ge=1,   le=256)
@@ -197,7 +197,7 @@ async def predict_endpoint(
         "confidence":    0.94,
         "probabilities": {"glioma": 0.94, "meningioma": 0.03, ...},
         "gradcam_path":  "/path/to/gradcam/<image_id>.png",
-        "model_used":    "efficientnet"
+        "model_used":    "mambavision"
       }
     }
     ```
@@ -992,8 +992,8 @@ async def preprocess_preview(
 
 class TrainStartRequest(BaseModel):
     architecture: str = Field(
-        default="efficientnet",
-        description="Architecture to train: cnn | vgg16 | resnet50 | efficientnet",
+        default="mambavision",
+        description="Architecture to train: mambavision | cnn | vgg16 | resnet50 | efficientnet",
     )
     epochs: int          = Field(default=30, ge=1, le=500)
     batch_size: int      = Field(default=32, ge=1, le=256)

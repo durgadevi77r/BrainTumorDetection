@@ -11,9 +11,8 @@ Import the singleton `settings` anywhere in the app:
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -122,6 +121,16 @@ class Settings(BaseSettings):
     max_failed_logins: int = 5
     lockout_minutes: int = 15
 
+    # ── Default seed account passwords ────────────────────────────────────────
+    # In development these fall back to the well-known placeholder values.
+    # In production ALL four MUST be set to strong, unique secrets via env vars
+    # (or Docker secrets piped into the environment).  The UserStore will
+    # refuse to start in production if any value is still the placeholder.
+    default_admin_password:      str = "Admin@123!"
+    default_researcher_password: str = "Research@123!"
+    default_operator_password:   str = "Operator@123!"
+    default_viewer_password:     str = "Viewer@123!"
+
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = "INFO"
     log_dir: Path  = BASE_DIR / "logs"
@@ -142,6 +151,19 @@ class Settings(BaseSettings):
         if v.lower() not in allowed:
             raise ValueError(f"ai_service_env must be one of {allowed}")
         return v.lower()
+
+    @field_validator("jwt_secret_key")
+    @classmethod
+    def validate_jwt_secret(cls, v: str, info: Any) -> str:
+        """Reject the placeholder JWT secret when running in production."""
+        _PLACEHOLDER = "change-me-in-production-use-a-long-random-secret"
+        env = (info.data or {}).get("ai_service_env", "development")
+        if env == "production" and v == _PLACEHOLDER:
+            raise ValueError(
+                "JWT_SECRET_KEY must be set to a strong random secret in production. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        return v
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
 [![CI](https://github.com/your-org/brain-tumor-detection/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/brain-tumor-detection/actions/workflows/ci.yml)
 [![CD](https://github.com/your-org/brain-tumor-detection/actions/workflows/cd.yml/badge.svg)](https://github.com/your-org/brain-tumor-detection/actions/workflows/cd.yml)
 [![Python](https://img.shields.io/badge/Python-3.12-blue)](https://www.python.org/)
-[![TensorFlow](https://img.shields.io/badge/TensorFlow-2.20-orange)](https://www.tensorflow.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.4-orange)](https://pytorch.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-20_LTS-green)](https://nodejs.org/)
 [![React](https://img.shields.io/badge/React-18-61DAFB)](https://reactjs.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
@@ -24,7 +24,7 @@ Brain Tumour Detection is a production-ready, full-stack application that classi
 | **Pituitary** | Tumour of the pituitary gland |
 | **No Tumour** | Healthy scan — no detectable mass |
 
-The system supports four model architectures, provides Grad-CAM visual explanations, offers async training with experiment tracking, and ships with a React dashboard for real-time monitoring.
+The system supports five model architectures (including MambaVision, the official state-of-the-art vision Mamba model), provides Grad-CAM visual explanations, offers async training with experiment tracking, and ships with a React dashboard for real-time monitoring.
 
 ---
 
@@ -46,7 +46,7 @@ Browser (React 18 + Vite + Tailwind CSS)
   └── /api/compare                Model comparison
          │  proxies AI requests
          ▼
-  Python / FastAPI / TensorFlow  ← port 8000
+  Python / FastAPI / PyTorch     ← port 8000
   ├── /api/v1/health              Liveness probe
   ├── /api/v1/predict             Single-image inference + Grad-CAM
   ├── /api/v1/train               Model training (sync + async)
@@ -69,9 +69,11 @@ Browser (React 18 + Vite + Tailwind CSS)
 | **Backend** | Node.js + Express | 20 LTS / 4.21 |
 | **Database** | SQLite via better-sqlite3 | — |
 | **AI Service** | Python + FastAPI | 3.12 / 0.115.5 |
-| **Deep Learning** | TensorFlow / Keras | 2.20 |
+| **Deep Learning** | PyTorch + torchvision | 2.4.1 / 0.19.1 |
+| **MambaVision** | Official NVIDIA implementation | 1.2.0 |
+| **Transformers** | Hugging Face (model loader) | 4.43.3 |
 | **Computer Vision** | OpenCV + Pillow | 4.10 / 11.0 |
-| **Explainability** | Grad-CAM (tf-explain) | 0.3.1 |
+| **Explainability** | Grad-CAM (PyTorch) | custom |
 | **Auth** | JWT (python-jose) + bcrypt | HS256 / 4.0 |
 | **Rate Limiting** | SlowAPI | 0.1.9 |
 | **Container** | Docker + Docker Compose | 24+ / v2 |
@@ -197,7 +199,7 @@ npm run dev
 curl -X POST http://localhost:8000/api/v1/train \
   -H "Content-Type: application/json" \
   -d '{
-    "model_name": "efficientnet",
+    "model_name": "mambavision",
     "epochs": 30,
     "batch_size": 32,
     "learning_rate": 0.0001,
@@ -233,12 +235,13 @@ curl http://localhost:8000/api/v1/train/experiments
 
 | Architecture | Params (approx.) | Notes |
 |---|---|---|
-| **EfficientNetB0** (default) | 5.3M | Best accuracy / speed tradeoff |
+| **MambaVision-T** (default) | 31.8M | State-of-the-art vision Mamba, official NVIDIA implementation |
+| **EfficientNet-B3** | 12M | Excellent accuracy/speed tradeoff (torchvision) |
 | **ResNet50** | 25.6M | Solid baseline, good generalisation |
 | **VGG16** | 138M | Classic, high memory usage |
 | **Custom CNN** | ~500K | Lightweight, fast training |
 
-All architectures support two-phase fine-tuning: head training first, then selective backbone unfreezing.
+All transfer-learning architectures support two-phase fine-tuning: head training first, then selective backbone unfreezing.
 
 ---
 
@@ -310,10 +313,10 @@ cd backend && npm test
 | `AI_SERVICE_ENV` | `development` | `development` \| `production` |
 | `AI_SERVICE_DEBUG` | `true` | Enable debug mode |
 | `ALLOWED_ORIGINS` | `http://localhost:3000,...` | Comma-separated CORS origins |
-| `ACTIVE_MODEL` | `efficientnet` | `cnn` \| `vgg16` \| `resnet50` \| `efficientnet` |
+| `ACTIVE_MODEL` | `mambavision` | `mambavision` \| `cnn` \| `vgg16` \| `resnet50` \| `efficientnet` |
 | `IMAGE_SIZE` | `224` | Input image dimension (pixels) |
 | `CLASS_NAMES` | `glioma,meningioma,notumor,pituitary` | Comma-separated class labels |
-| `SAVED_MODELS_DIR` | `./saved_models` | Trained Keras weights directory |
+| `SAVED_MODELS_DIR` | `./saved_models` | Trained PyTorch model directory |
 | `DATASET_RAW_DIR` | `./dataset/raw` | Raw MRI image dataset |
 | `DATASET_PROCESSED_DIR` | `./dataset/processed` | Preprocessed images |
 | `GRADCAM_OUTPUT_DIR` | `./gradcam_output` | Grad-CAM PNG output |
@@ -391,7 +394,7 @@ Run `make help` for the full list.
 
 ```
 brain-tumor-detection/
-├── ai-service/                  Python / FastAPI / TensorFlow
+├── ai-service/                  Python / FastAPI / PyTorch
 │   ├── app/
 │   │   ├── api/                 REST route handlers
 │   │   ├── core/                Config, logging
@@ -405,7 +408,7 @@ brain-tumor-detection/
 │   │   ├── training/            Job store, experiment registry
 │   │   └── utils/               Grad-CAM
 │   ├── dataset/                 raw/ and processed/ MRI images
-│   ├── saved_models/            Trained Keras weights
+│   ├── saved_models/            Trained PyTorch checkpoints
 │   ├── tests/                   pytest suite (1,100+ tests)
 │   ├── Dockerfile
 │   └── requirements.txt
@@ -469,6 +472,7 @@ This project is licensed under the MIT License — see [LICENSE](LICENSE) for de
 ## Acknowledgements
 
 - [Brain Tumor MRI Dataset](https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset) (Kaggle) for training data
-- [TensorFlow](https://www.tensorflow.org/) team for the deep learning framework
+- [PyTorch](https://pytorch.org/) team for the deep learning framework
+- [NVIDIA](https://github.com/NVlabs/MambaVision) for the official MambaVision implementation
+- [Hugging Face](https://huggingface.co/) for the Transformers library and model hub
 - [FastAPI](https://fastapi.tiangolo.com/) for the elegant Python web framework
-- [tf-explain](https://tf-explain.readthedocs.io/) for Grad-CAM explainability

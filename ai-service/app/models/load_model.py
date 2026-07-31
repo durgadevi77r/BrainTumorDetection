@@ -1,13 +1,30 @@
 """
 load_model.py — PyTorch model loading with an in-memory cache.
 
+Two on-disk formats are supported, matching the two formats written by
+``save_model.py``:
+
+HF format (MambaVision and any ``save_format="hf"`` model)
+-----------------------------------------------------------
+    saved_models/<model_name>/
+        config.json             ← Hugging Face model config
+        model.safetensors       ← weights (or pytorch_model.bin)
+        model_info.json         ← training metadata
+
+PT format (cnn / vgg16 / resnet50 / efficientnet)
+--------------------------------------------------
+    saved_models/<model_name>/
+        weights.pt              ← torch.save(state_dict)
+        model_info.json         ← training metadata
+
 The cache is keyed by model_name so each model is loaded only once
 per process. Call clear_model_cache() between tests or when hot-reloading.
 
 Usage
 -----
     from app.models.load_model import load_model
-    model = load_model("mambavision")   # cached after first call
+    model = load_model("mambavision")   # HF format — cached after first call
+    model = load_model("resnet50")      # PT  format — cached after first call
     preds = model.predict(tensor)
 """
 
@@ -15,7 +32,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional, Tuple
 
 from app.core.config import settings
 from app.core.logging import logger
@@ -24,35 +41,127 @@ from app.core.logging import logger
 # Populated lazily; persists for the lifetime of the process / worker.
 _model_cache: Dict[str, Any] = {}
 
+# Sentinel type for the resolved format
+_Format = Literal["hf", "pt"]
 
-def _resolve_model_path(model_name: str) -> Path:
+
+def _resolve_model_path(model_name: str) -> Tuple[Path, _Format]:
     """
-    Locate saved weights for *model_name* inside ``settings.saved_models_dir``.
+    Locate saved weights for *model_name* inside ``settings.saved_models_dir``
+    and determine which on-disk format was used by ``save_model.py``.
 
     Search order
     ------------
-    1. ``saved_models/<model_name>/`` — Hugging Face model directory (config.json)
+    1. ``saved_models/<model_name>/config.json``  → HF format (directory path)
+    2. ``saved_models/<model_name>/weights.pt``   → PT format (file path)
+
+    Returns
+    -------
+    (path, format)
+        *path* is the model directory for HF, or the ``weights.pt`` file for PT.
+        *format* is ``"hf"`` or ``"pt"``.
 
     Raises
     ------
     FileNotFoundError
-        When no artefact can be found for the given model name.
+        When neither artefact can be found for the given model name.
     """
     base: Path = settings.saved_models_dir
-
     model_dir = base / model_name
+
+    # ── HF format: directory containing config.json ───────────────────────────
     if model_dir.is_dir() and (model_dir / "config.json").is_file():
-        return model_dir
+        logger.debug(f"_resolve_model_path: '{model_name}' → HF format at {model_dir}")
+        return model_dir, "hf"
+
+    # ── PT format: directory containing weights.pt ────────────────────────────
+    weights_file = model_dir / "weights.pt"
+    if model_dir.is_dir() and weights_file.is_file():
+        logger.debug(f"_resolve_model_path: '{model_name}' → PT format at {weights_file}")
+        return weights_file, "pt"
 
     raise FileNotFoundError(
         f"No saved model found for '{model_name}' in {base}. "
+        "Expected either 'config.json' (HF format) or 'weights.pt' (PT format). "
         "Train the model first via POST /api/v1/train."
     )
+
+
+def _load_hf_model(name: str, model_path: Path) -> Any:
+    """
+    Load a Hugging Face / MambaVision model from a local directory.
+
+    The directory must contain ``config.json`` (and typically
+    ``model.safetensors`` or ``pytorch_model.bin``).
+
+    Returns a ``TorchImageClassifier`` wrapping the HF model.
+    """
+    # Lazy imports — torch and transformers are heavy; avoid them in test envs
+    # that mock the model layer.
+    from transformers import AutoModelForImageClassification          # noqa: PLC0415
+    from app.models.mambavision.config import MambaVisionHFConfig    # noqa: PLC0415
+    from app.models.mambavision.predictor import TorchImageClassifier # noqa: PLC0415
+
+    hf_cfg = MambaVisionHFConfig()
+    try:
+        model = AutoModelForImageClassification.from_pretrained(
+            str(model_path),
+            trust_remote_code=hf_cfg.trust_remote_code,
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load HF model '{name}' from {model_path}: {exc}"
+        ) from exc
+
+    return TorchImageClassifier(model)
+
+
+def _load_pt_model(name: str, weights_path: Path) -> Any:
+    """
+    Reconstruct an architecture from the registry and load a ``state_dict``
+    from ``weights.pt``.
+
+    Uses ``build_model(name)`` so the architecture is guaranteed to match
+    the one used during training (and saved by ``save_model.py``).
+
+    Returns a ``TorchImageClassifier`` wrapping the reconstructed model.
+    """
+    import torch                                                       # noqa: PLC0415
+    from app.models.architectures import build_model                   # noqa: PLC0415
+    from app.models.mambavision.predictor import TorchImageClassifier  # noqa: PLC0415
+
+    # Reconstruct the bare nn.Module (random weights at this point)
+    try:
+        nn_model = build_model(name)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to reconstruct architecture for '{name}': {exc}"
+        ) from exc
+
+    # Load state dict — map to CPU first so GPU-saved weights work everywhere
+    try:
+        state = torch.load(
+            str(weights_path),
+            map_location=torch.device("cpu"),
+            weights_only=True,
+        )
+        nn_model.load_state_dict(state)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to load state_dict for '{name}' from {weights_path}: {exc}"
+        ) from exc
+
+    logger.debug(f"State dict loaded into '{name}' architecture")
+    return TorchImageClassifier(nn_model)
 
 
 def load_model(model_name: Optional[str] = None) -> Any:
     """
     Load (and cache) an image classifier from the ``saved_models`` directory.
+
+    Automatically detects whether the saved artefact is in HF format
+    (``config.json`` present) or PT format (``weights.pt`` present) and
+    dispatches to the appropriate loader.
 
     Parameters
     ----------
@@ -78,34 +187,21 @@ def load_model(model_name: Optional[str] = None) -> Any:
         logger.debug(f"Model cache hit for '{name}'")
         return _model_cache[name]
 
-    # ── Resolve path ──────────────────────────────────────────────────────────
-    model_path = _resolve_model_path(name)
-    logger.info(f"Loading model '{name}' from {model_path} …")
+    # ── Resolve path and format ───────────────────────────────────────────────
+    model_path, fmt = _resolve_model_path(name)
+    logger.info(f"Loading model '{name}' ({fmt} format) from {model_path} …")
 
-    # ── Load ──────────────────────────────────────────────────────────────────
-    # Lazy imports: torch and transformers are heavy and not available in
-    # lightweight test environments — only import when actually loading a model.
-    from transformers import AutoModelForImageClassification  # noqa: PLC0415
-    from app.models.mambavision.config import MambaVisionHFConfig  # noqa: PLC0415
-    from app.models.mambavision.predictor import TorchImageClassifier  # noqa: PLC0415
+    # ── Dispatch to format-specific loader ────────────────────────────────────
+    if fmt == "hf":
+        wrapped = _load_hf_model(name, model_path)
+    else:
+        wrapped = _load_pt_model(name, model_path)
 
-    hf_cfg = MambaVisionHFConfig()
-    try:
-        model = AutoModelForImageClassification.from_pretrained(
-            str(model_path),
-            trust_remote_code=hf_cfg.trust_remote_code,
-        )
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to load model '{name}' from {model_path}: {exc}"
-        ) from exc
-
-    wrapped = TorchImageClassifier(model)
-
+    # ── Cache and return ──────────────────────────────────────────────────────
     _model_cache[name] = wrapped
     total_params = wrapped.count_params()
     logger.info(
-        f"Model '{name}' loaded and cached | params={total_params:,}"
+        f"Model '{name}' loaded and cached | fmt={fmt} params={total_params:,}"
     )
     return wrapped
 
@@ -143,6 +239,8 @@ def get_model_info(model_name: Optional[str] = None) -> Dict[str, Any]:
 def is_model_available(model_name: Optional[str] = None) -> bool:
     """
     Return True if saved weights exist for *model_name* (no loading).
+
+    Checks for both HF format (config.json) and PT format (weights.pt).
 
     Parameters
     ----------

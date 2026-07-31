@@ -42,7 +42,7 @@ Brain Tumour Detection — system design, data flows, and folder structure.
                              │  HTTP (JSON / multipart)
                              ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                 Python / FastAPI / TensorFlow                       │
+│              Python / FastAPI / PyTorch / MambaVision               │
 │                     AI Service — port 8000                          │
 │   ┌─────────────────────────────────────────────────────────────┐   │
 │   │  API Layer  (routes.py / auth_routes.py / perf_routes.py)   │   │
@@ -50,14 +50,14 @@ Brain Tumour Detection — system design, data flows, and folder structure.
 │                            │                                        │
 │   ┌──────────┐  ┌─────────────────┐  ┌──────────┐  ┌───────────┐   │
 │   │ Dataset  │  │  Preprocessing  │  │  Models  │  │ Inference │   │
-│   │ Manager  │  │    Pipeline     │  │  (Keras) │  │ Pipeline  │   │
+│   │ Manager  │  │    Pipeline     │  │(PyTorch) │  │ Pipeline  │   │
 │   └──────────┘  └─────────────────┘  └──────────┘  └───────────┘   │
 │   ┌──────────┐  ┌─────────────────┐  ┌──────────┐  ┌───────────┐   │
 │   │ Security │  │    Training     │  │ Metrics  │  │ Perf Mon  │   │
 │   │  & Auth  │  │ (Async + Exp.)  │  │Dashboard │  │Benchmarks │   │
 │   └──────────┘  └─────────────────┘  └──────────┘  └───────────┘   │
 │                                                                     │
-│   Saved Keras weights   Dataset (raw/processed)   Logs / Audit     │
+│   PyTorch weights   Dataset (raw/processed)   Logs / Audit         │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,9 +81,9 @@ Brain Tumour Detection — system design, data flows, and folder structure.
 
 ### Tier 3 — AI Service (Deep Learning)
 
-- **Technology:** Python 3.12, FastAPI 0.115, TensorFlow 2.20, Keras 3
+- **Technology:** Python 3.12, FastAPI 0.115, PyTorch 2.x, MambaVision 1.2 (HuggingFace Transformers)
 - **Responsibilities:** Model training, inference, Grad-CAM, dataset management, preprocessing pipeline, authentication, monitoring
-- **State:** Keras model weights (saved_models/), dataset (dataset/), logs, Grad-CAM output
+- **State:** PyTorch weights (saved_models/), dataset (dataset/), logs, Grad-CAM output
 
 ---
 
@@ -103,13 +103,13 @@ Brain Tumour Detection — system design, data flows, and folder structure.
                        │ 224×224×3 float32 tensor
                        ▼
                 ┌─────────────┐
-                │   Keras     │ EfficientNetB0 / ResNet50 / VGG16 / CNN
+                │  PyTorch    │ MambaVision (default) / CNN / ResNet50
                 │   Model     │ softmax output (4 classes)
                 └──────┬──────┘
                        │ class probabilities
                        ▼
                 ┌─────────────┐
-                │  Grad-CAM   │ tf-explain: guided backpropagation
+                │  Grad-CAM   │ PyTorch hooks: guided backpropagation
                 │  Heatmap    │ → PNG overlay base64
                 └──────┬──────┘
                        │
@@ -174,16 +174,16 @@ Build model (architectures.py MODEL_REGISTRY)
      ▼
 Phase 1 — Head training
    Backbone frozen
-   Train dense classification head
+   Train classification head
    Early stopping on val_loss
-   ModelCheckpoint → saved_models/{name}/best.keras
+   save_best_checkpoint() → saved_models/{name}/weights.pt
      │
      ▼
 Phase 2 — Fine-tuning (if fine_tune=true)
    Unfreeze last N backbone layers
    Lower learning rate (÷10)
    Additional epochs
-   ModelCheckpoint updates if val_acc improves
+   save_best_checkpoint() updates if val_acc improves
      │
      ▼
 Save final weights → saved_models/{name}/
@@ -224,7 +224,7 @@ POST /predict (multipart file)
 InferencePipeline.predict()
          │
          ├─▶ LRU Model Cache
-         │   ├── MISS → load_keras_model() → cache → use
+         │   ├── MISS → load_model() → cache → use
          │   └── HIT  → use cached model
          │
          ├─▶ Preprocessing Pipeline
@@ -233,7 +233,7 @@ InferencePipeline.predict()
          ├─▶ model.predict(tensor) → probabilities[4]
          │
          ├─▶ Grad-CAM generation
-         │   tf-explain GradCAM → PNG → base64
+         │   PyTorch hooks GradCAM → PNG → base64
          │
          ├─▶ Record to InferenceMetrics
          │   (latency, class distribution, success/failure)
@@ -389,7 +389,7 @@ Docker Compose services:
                           │
                    Docker networks: app-network
                    Docker volumes:
-                      models_volume      ← Keras weights
+                      models_volume      ← PyTorch weights
                       dataset_volume     ← MRI images
                       uploads_volume     ← User uploads
                       db_volume          ← SQLite DB
@@ -424,7 +424,7 @@ brain-tumor-detection/                Root
 │   │   ├── utils/                    Grad-CAM utility (1 module)
 │   │   └── main.py                   Application factory
 │   ├── dataset/                      raw/ and processed/ MRI data
-│   ├── saved_models/                 Trained Keras weights (.keras)
+│   ├── saved_models/                 Trained PyTorch weights (.pt / HF format)
 │   ├── gradcam_output/               Generated heatmap PNGs
 │   ├── logs/                         Application + audit logs
 │   ├── tests/                        pytest test suite (15+ files)
@@ -514,9 +514,10 @@ brain-tumor-detection/                Root
 
 | Decision | Choice | Alternative Considered | Reason |
 |---|---|---|---|
-| AI framework | TensorFlow 2.20 / Keras 3 | PyTorch | Keras API simplicity; built-in Grad-CAM via tf-explain |
+| AI framework | PyTorch 2.x + HuggingFace Transformers | TensorFlow 2 / Keras | State-of-the-art vision transformer support; native Grad-CAM hooks; MambaVision integration; active research ecosystem |
+| Model architecture | MambaVision (default) | EfficientNetB0, ResNet50, CNN | Best accuracy on brain tumour benchmarks; SSM-based hybrid transformer; HuggingFace pretrained weights |
+| Grad-CAM | PyTorch native hooks | tf-explain | Framework consistency; no additional dependency; full control over layer selection |
 | Python web framework | FastAPI | Flask, Django | Async support; automatic OpenAPI docs; Pydantic validation |
-| Default model | EfficientNetB0 | ResNet50 | Best accuracy/parameter efficiency tradeoff; ImageNet pretrained |
 | Node.js DB | SQLite (better-sqlite3) | PostgreSQL | Zero-ops for development; scales to production with swap |
 | Frontend build | Vite 5 | Create React App, Next.js | Fastest HMR; lightweight; SSR not needed |
 | CSS framework | Tailwind CSS 3 | styled-components, MUI | Utility-first; no CSS-in-JS overhead; good with TypeScript |
@@ -524,3 +525,9 @@ brain-tumor-detection/                Root
 | Rate limiting | SlowAPI | express-rate-limit | Native FastAPI/Starlette integration |
 | Containerisation | Docker + Compose | Kubernetes | Sufficient for current scale; easy local dev |
 | CI | GitHub Actions | Jenkins, CircleCI | Free for public repos; native GitHub integration |
+
+> **Migration note:** The project originally used TensorFlow 2.20 / Keras 3 with EfficientNetB0 as the default model.
+> The framework was migrated to PyTorch + MambaVision (Module 5) to gain access to state-of-the-art
+> vision transformer architectures and simplify the Grad-CAM implementation.
+> Legacy TF scripts (`download_and_train.py`, `post_train_validate.py`, `restore_checkpoint.py`) are retained
+> in the repository root marked as DEPRECATED and will be removed in a future release.
