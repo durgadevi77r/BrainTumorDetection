@@ -8,7 +8,7 @@ probabilities, then triggers Grad-CAM generation.
 Usage
 -----
     from app.models.predict import predict
-    result = predict(image_bytes, model_name="efficientnet")
+    result = predict(image_bytes, model_name="mambavision")
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ import numpy as np
 
 from app.core.config import settings
 from app.core.logging import logger
-from app.models.load_model import load_keras_model
+from app.models.load_model import load_model
 from app.preprocessing.preprocess import preprocess_image
 
 
@@ -71,7 +71,7 @@ def predict(
     classes  = settings.classes
 
     # ── Load model (cached) ───────────────────────────────────────────────────
-    model = load_keras_model(name)
+    model = load_model(name)
 
     # ── Preprocess ────────────────────────────────────────────────────────────
     tensor = preprocess_image(source, expand_dims=True)   # (1, H, W, C)

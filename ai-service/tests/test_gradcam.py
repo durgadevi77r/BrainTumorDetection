@@ -362,7 +362,7 @@ class TestOutputDimensions:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TestGenerateGradcam  (full pipeline — load_keras_model mocked)
+# TestGenerateGradcam  (full pipeline — load_model mocked)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestGenerateGradcam:
@@ -385,7 +385,7 @@ class TestGenerateGradcam:
 
     def test_returns_required_keys(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, output_dir=tmp_output)
         required = {
             "gradcam_path", "original_path", "heatmap_path",
@@ -396,33 +396,33 @@ class TestGenerateGradcam:
 
     def test_gradcam_path_is_overlay_png(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, output_dir=tmp_output)
         assert Path(result["gradcam_path"]).name == "overlay.png"
 
     def test_all_files_created(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, output_dir=tmp_output)
         for key in ("gradcam_path", "original_path", "heatmap_path", "metadata_path"):
             assert Path(result[key]).exists(), f"{key} file not found"
 
     def test_explicit_class_index_respected(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, class_index=2, output_dir=tmp_output)
         assert result["class_index"] == 2
 
     def test_explicit_image_id_respected(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
         my_id = "test-image-abc"
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, image_id=my_id, output_dir=tmp_output)
         assert result["image_id"] == my_id
 
     def test_auto_image_id_is_uuid(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, output_dir=tmp_output)
         # Should parse without error
         uuid.UUID(result["image_id"])
@@ -431,20 +431,20 @@ class TestGenerateGradcam:
         self, tmp_output, wrapped_model, png_bytes
     ) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, output_dir=tmp_output)
         assert 0.0 <= result["confidence"] <= 1.0
 
     def test_class_name_is_valid(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
         from app.core.config import settings
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, output_dir=tmp_output)
         assert result["class_name"] in settings.classes
 
     def test_target_layer_string_nonempty(self, tmp_output, wrapped_model, png_bytes) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(png_bytes, output_dir=tmp_output)
         assert isinstance(result["target_layer"], str)
         assert len(result["target_layer"]) > 0
@@ -454,7 +454,7 @@ class TestGenerateGradcam:
         from app.utils.gradcam import generate_gradcam
         img_path = tmp_path / "test.png"
         img_path.write_bytes(_varied_png_bytes())
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(img_path, output_dir=tmp_output)
         assert Path(result["gradcam_path"]).exists()
 
@@ -472,7 +472,7 @@ class TestOutputDirectory:
     def test_creates_per_image_subdirectory(self, tmp_path, wrapped_model) -> None:
         from app.utils.gradcam import generate_gradcam
         img_id = "dir-test-001"
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             generate_gradcam(
                 _varied_png_bytes(),
                 image_id=img_id,
@@ -484,7 +484,7 @@ class TestOutputDirectory:
         from app.utils.gradcam import generate_gradcam
         deep_dir = tmp_path / "a" / "b" / "c"
         assert not deep_dir.exists()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(
                 _varied_png_bytes(), output_dir=deep_dir
             )
@@ -492,7 +492,7 @@ class TestOutputDirectory:
 
     def test_overlay_png_is_readable_image(self, tmp_path, wrapped_model) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         img = cv2.imread(result["gradcam_path"])
         assert img is not None
@@ -500,14 +500,14 @@ class TestOutputDirectory:
 
     def test_original_png_is_readable_image(self, tmp_path, wrapped_model) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         img = cv2.imread(result["original_path"])
         assert img is not None
 
     def test_heatmap_png_is_readable_image(self, tmp_path, wrapped_model) -> None:
         from app.utils.gradcam import generate_gradcam
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+        with patch("app.models.load_model.load_model", return_value=wrapped_model):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         img = cv2.imread(result["heatmap_path"])
         assert img is not None
@@ -517,7 +517,7 @@ class TestOutputDirectory:
         out = tmp_path / "multi"
         results = []
         for i in range(3):
-            with patch("app.models.load_model.load_keras_model", return_value=wrapped_model):
+            with patch("app.models.load_model.load_model", return_value=wrapped_model):
                 r = generate_gradcam(
                     _varied_png_bytes(seed=i),
                     image_id=f"img-{i}",
@@ -538,7 +538,7 @@ class TestMetadata:
     def result_and_meta(self, tmp_path):
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(
                 _varied_png_bytes(),
                 image_id="meta-test-001",
@@ -551,7 +551,7 @@ class TestMetadata:
     def test_metadata_file_is_valid_json(self, tmp_path) -> None:
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         with open(result["metadata_path"], encoding="utf-8") as fh:
             data = json.load(fh)
@@ -635,7 +635,7 @@ class TestConfidenceMatch:
 
         wrapped.predict = _tracking_predict  # type: ignore[method-assign]
 
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(png, output_dir=tmp_path / "out")
 
         assert "probs" in captured
@@ -659,7 +659,7 @@ class TestConfidenceMatch:
 
         wrapped.predict = _tracking_predict  # type: ignore[method-assign]
 
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(png, class_index=1, output_dir=tmp_path / "out")
 
         expected = round(float(captured["probs"][0, 1]), 6)
@@ -676,15 +676,15 @@ class TestEdgeCases:
         """Garbage bytes that can't be decoded should raise, not silently succeed."""
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             with pytest.raises(Exception):
                 generate_gradcam(b"not-an-image", output_dir=tmp_path / "out")
 
     def test_missing_model_path_raises_file_not_found(self, tmp_path) -> None:
-        """FileNotFoundError when load_keras_model can't find weights."""
+        """FileNotFoundError when load_model can't find weights."""
         from app.utils.gradcam import generate_gradcam
         with patch(
-            "app.models.load_model.load_keras_model",
+            "app.models.load_model.load_model",
             side_effect=FileNotFoundError("no model"),
         ):
             with pytest.raises(FileNotFoundError):
@@ -693,7 +693,7 @@ class TestEdgeCases:
     def test_out_of_range_class_index_raises(self, tmp_path) -> None:
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped(num_classes=4)
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             with pytest.raises(ValueError, match="class_index"):
                 generate_gradcam(
                     _varied_png_bytes(),
@@ -708,7 +708,7 @@ class TestEdgeCases:
         img = np.full((1, 1, 3), 128, dtype=np.uint8)
         ok, buf = cv2.imencode(".png", img)
         assert ok
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(buf.tobytes(), output_dir=tmp_path / "out")
         assert Path(result["gradcam_path"]).exists()
 
@@ -845,21 +845,21 @@ class TestBackwardCompat:
     def test_gradcam_path_key_present(self, tmp_path) -> None:
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         assert "gradcam_path" in result
 
     def test_gradcam_path_is_a_string(self, tmp_path) -> None:
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         assert isinstance(result["gradcam_path"], str)
 
     def test_gradcam_path_file_exists_on_disk(self, tmp_path) -> None:
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         assert Path(result["gradcam_path"]).exists()
 
@@ -867,7 +867,7 @@ class TestBackwardCompat:
         """Exact set of keys the rest of the codebase may depend on."""
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(_varied_png_bytes(), output_dir=tmp_path / "out")
         expected_keys = {
             "gradcam_path", "original_path", "heatmap_path", "metadata_path",
@@ -882,7 +882,7 @@ class TestBackwardCompat:
         """
         from app.utils.gradcam import generate_gradcam
         wrapped = _make_wrapped()
-        with patch("app.models.load_model.load_keras_model", return_value=wrapped):
+        with patch("app.models.load_model.load_model", return_value=wrapped):
             result = generate_gradcam(
                 _varied_png_bytes(),
                 model_name="mambavision",

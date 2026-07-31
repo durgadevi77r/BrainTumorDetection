@@ -60,7 +60,7 @@ from app.core.config import settings
 from app.core.logging import logger
 from app.models.architectures import build_model, build_optimizer, unfreeze_top_layers
 from app.models.evaluate import evaluate_model
-from app.models.save_model import save_keras_model
+from app.models.save_model import save_model
 from app.preprocessing.augmentation import AugmentationConfig
 from app.preprocessing.preprocess import build_generators, build_test_generator
 from training.callbacks import build_callbacks, CallbackBundle
@@ -502,7 +502,7 @@ class Trainer:
         p1_hist = self.experiment.phase1_history
         p2_hist = self.experiment.phase2_history
 
-        saved_paths = save_keras_model(
+        saved_paths = save_model(
             self.model,
             self.cfg.architecture,
             output_dir=self.cfg.resolved_output_dir,

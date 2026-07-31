@@ -37,7 +37,7 @@ from app.models.load_model import (
     clear_model_cache,
     get_model_info,
     is_model_available,
-    load_keras_model,
+    load_model,
 )
 
 
@@ -145,7 +145,7 @@ class ModelCache:
         t0 = time.perf_counter()
         try:
             clear_model_cache(name)
-            model = load_keras_model(name)
+            model = load_model(name)
         except Exception as exc:
             raise RuntimeError(
                 f"Failed to load model '{name}' from {model_path}: {exc}"

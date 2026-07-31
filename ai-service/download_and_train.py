@@ -1,6 +1,10 @@
 """
 download_and_train.py — Download dataset, prepare splits, train EfficientNetB3.
 
+DEPRECATED: This script uses TensorFlow/Keras and was part of the legacy
+training pipeline. The project has migrated to PyTorch. Use the Trainer
+class in training/trainer.py or POST /api/v1/train/start instead.
+
 Dataset: Brain Tumor MRI Dataset (Msoud Nickparvar, Kaggle)
   Classes: glioma / meningioma / notumor / pituitary
   ~7,023 images

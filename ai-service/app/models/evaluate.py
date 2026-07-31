@@ -44,7 +44,7 @@ from sklearn.metrics import (
 
 from app.core.config import settings
 from app.core.logging import logger
-from app.models.load_model import load_keras_model, get_model_info
+from app.models.load_model import load_model, get_model_info
 from app.preprocessing.preprocess import build_test_generator
 
 
@@ -150,7 +150,7 @@ def evaluate_model(
     logger.info(f"Evaluation started | model={name} dataset={data_dir}")
 
     # Load model (cached TorchImageClassifier)
-    wrapped = load_keras_model(name)
+    wrapped = load_model(name)
 
     # Build test DataLoader
     test_loader = build_test_generator(

@@ -25,7 +25,7 @@ os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 from app.core.config import settings
 from app.core.logging import logger
 from app.models.architectures import build_model
-from app.models.save_model import save_keras_model
+from app.models.save_model import save_model
 
 MODEL_NAME = "efficientnet"
 
@@ -42,7 +42,7 @@ def main():
     model.summary(line_length=80)
 
     print(f"\nSaving model to {settings.saved_models_dir / MODEL_NAME} ...")
-    paths = save_keras_model(
+    paths = save_model(
         model,
         MODEL_NAME,
         metadata={

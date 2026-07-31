@@ -832,7 +832,7 @@ class TestEvaluateModelCompat:
         expected = self._lightweight_metrics()
 
         with (
-            patch("app.models.evaluate.load_keras_model") as mock_load,
+            patch("app.models.evaluate.load_model") as mock_load,
             patch("app.models.evaluate.build_test_generator") as mock_gen,
             patch("app.models.evaluate.get_model_info", return_value={}),
         ):
@@ -866,7 +866,7 @@ class TestEvaluateModelCompat:
         from app.models.evaluate import evaluate_model
 
         with (
-            patch("app.models.evaluate.load_keras_model") as mock_load,
+            patch("app.models.evaluate.load_model") as mock_load,
             patch("app.models.evaluate.build_test_generator") as mock_gen,
             patch("app.models.evaluate.get_model_info", return_value={}),
         ):
@@ -895,7 +895,7 @@ class TestEvaluateModelCompat:
         from app.models.evaluate import evaluate_model
 
         with (
-            patch("app.models.evaluate.load_keras_model") as mock_load,
+            patch("app.models.evaluate.load_model") as mock_load,
             patch("app.models.evaluate.build_test_generator") as mock_gen,
         ):
             wrapped = MagicMock()
@@ -951,7 +951,7 @@ class TestEvaluateModelCompat:
         from app.core.config import settings
 
         with (
-            patch("app.models.evaluate.load_keras_model") as mock_load,
+            patch("app.models.evaluate.load_model") as mock_load,
             patch("app.models.evaluate.build_test_generator") as mock_gen,
             patch("app.models.evaluate.get_model_info", return_value={}),
         ):

@@ -56,10 +56,10 @@ async def lifespan(app: FastAPI):
 
     # Pre-load the active model into cache if weights are available.
     # A missing model is non-fatal at startup — the /train endpoint creates one.
-    from app.models.load_model import is_model_available, load_keras_model
+    from app.models.load_model import is_model_available, load_model
     if is_model_available(settings.active_model):
         try:
-            load_keras_model(settings.active_model)
+            load_model(settings.active_model)
             logger.info(f"Active model '{settings.active_model}' pre-loaded into cache.")
         except Exception as exc:
             logger.warning(f"Could not pre-load model '{settings.active_model}': {exc}")
@@ -85,7 +85,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Brain Tumour Detection — AI Service",
         description=(
-            "Python / TensorFlow backend for deep-learning-based MRI brain "
+            "Python / PyTorch backend for deep-learning-based MRI brain "
             "tumour classification. Exposes REST endpoints consumed by the "
             "Node.js Express backend."
         ),

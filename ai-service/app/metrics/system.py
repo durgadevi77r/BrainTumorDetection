@@ -104,16 +104,16 @@ def _gpu_metrics() -> Dict[str, Any]:
     """
     gpu_info: List[Dict[str, Any]] = []
 
-    # Try TensorFlow GPU list first (zero-cost if TF is already imported)
+    # Try PyTorch CUDA device list (zero-cost if torch is already imported)
     try:
-        import tensorflow as tf
-        gpus = tf.config.list_physical_devices("GPU")
-        for i, gpu in enumerate(gpus):
+        import torch
+        for i in range(torch.cuda.device_count()):
+            props = torch.cuda.get_device_properties(i)
             gpu_info.append({
                 "index": i,
-                "name": gpu.name,
+                "name": props.name,
                 "memory_used_mb": None,
-                "memory_total_mb": None,
+                "memory_total_mb": round(props.total_memory / (1024 ** 2)),
                 "utilization_percent": None,
             })
     except Exception:

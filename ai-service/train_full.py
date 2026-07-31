@@ -2,6 +2,10 @@
 train_full.py -- Download the Msoud Nickparvar dataset (7023 images, balanced)
 and train EfficientNetB3 from scratch with proper settings.
 
+DEPRECATED: This script uses TensorFlow/Keras and was part of the legacy
+training pipeline. The project has migrated to PyTorch. Use the Trainer
+class in training/trainer.py or POST /api/v1/train/start instead.
+
 Dataset: https://www.kaggle.com/datasets/masoudnickparvar/brain-tumor-mri-dataset
 GitHub mirror used here for direct download.
 

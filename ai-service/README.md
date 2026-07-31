@@ -75,9 +75,9 @@ ai-service/
 │   ├── models/
 │   │   ├── architectures.py   # build_model(), unfreeze_top_layers()
 │   │   ├── evaluate.py        # evaluate_model()
-│   │   ├── load_model.py      # load_keras_model() with cache
+│   │   ├── load_model.py      # load_model() with cache
 │   │   ├── predict.py         # predict() legacy inference shim
-│   │   ├── save_model.py      # save_keras_model()
+│   │   ├── save_model.py      # save_model()
 │   │   └── train.py           # Legacy synchronous train_model() shim
 │   ├── preprocessing/         # Preprocess, augmentation, transforms
 │   ├── metrics/               # Metrics & monitoring package (Module 8)
@@ -403,7 +403,7 @@ saved_models/
 
 | Artefact | Purpose |
 |---|---|
-| `saved_model.pb` | Primary inference artefact, loaded by `load_keras_model()` |
+| `saved_model.pb` | Primary inference artefact, loaded by `load_model()` |
 | `*.h5` | Portable weight file for sharing / deployment |
 | `model_info.json` | Metadata surfaced by `/health` and `/evaluate` endpoints |
 | `best_weights.h5` | Best-epoch weights (via `ModelCheckpoint` callback) |

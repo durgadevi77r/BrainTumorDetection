@@ -369,7 +369,7 @@ def generate_gradcam(
     IOError
         When cv2.imwrite fails to save an output file.
     """
-    from app.models.load_model import load_keras_model  # lazy — heavy import
+    from app.models.load_model import load_model  # lazy — heavy import
 
     name = (model_name or settings.active_model).lower()
     img_id = image_id or str(uuid.uuid4())
@@ -386,7 +386,7 @@ def generate_gradcam(
     img_output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Load model ────────────────────────────────────────────────────────────
-    wrapped_model = load_keras_model(name)
+    wrapped_model = load_model(name)
 
     # ── Preprocess image ──────────────────────────────────────────────────────
     tensor, display_rgb = preprocess_for_gradcam(source)

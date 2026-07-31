@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader
 from app.core.config import settings
 from app.core.logging import logger
 from app.models.architectures import build_model, build_optimizer, unfreeze_top_layers
-from app.models.save_model import save_best_checkpoint, load_best_checkpoint, save_keras_model
+from app.models.save_model import save_best_checkpoint, load_best_checkpoint, save_model
 from app.preprocessing.preprocess import build_data_generators
 
 
@@ -389,7 +389,7 @@ def train_model(
         )
     )
 
-    saved_paths = save_keras_model(
+    saved_paths = save_model(
         model,
         name,
         metadata={

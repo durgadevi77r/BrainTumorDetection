@@ -21,11 +21,8 @@ and surfaced through the /evaluate and /health endpoints.
 
 Usage
 -----
-    from app.models.save_model import save_keras_model
-    paths = save_keras_model(model, "mambavision", metadata={"val_accuracy": 0.97})
-
-The function is deliberately named ``save_keras_model`` to keep the call
-sites in train.py and trainer.py unchanged.
+    from app.models.save_model import save_model
+    paths = save_model(model, "mambavision", metadata={"val_accuracy": 0.97})
 """
 
 from __future__ import annotations
@@ -58,7 +55,7 @@ def _count_params(model: nn.Module) -> int:
 
 # ─── Public save entry point ──────────────────────────────────────────────────
 
-def save_keras_model(
+def save_model(
     model: nn.Module,
     model_name: str,
     *,
@@ -84,7 +81,7 @@ def save_keras_model(
         ``"hf"``   — force Hugging Face save_pretrained (requires HF model).
         ``"pt"``   — force torch.save(state_dict).
     also_save_h5 : bool
-        Legacy Keras kwarg — accepted and silently ignored.
+        Legacy kwarg — accepted and silently ignored.
     metadata : dict | None
         Arbitrary key/value pairs to include in ``model_info.json``.
 
@@ -275,11 +272,11 @@ def load_best_checkpoint(
         return False
 
 
-# ─── Legacy alias kept for any direct callers ─────────────────────────────────
-# ``save_best_checkpoint_callback`` was a Keras ModelCheckpoint factory.
-# Callers in trainer.py now call save_best_checkpoint() directly inside
-# the training loop, but we keep this name to avoid NameError in any
-# code that imported it.
+# ─── Legacy aliases ───────────────────────────────────────────────────────────
+# Renamed as part of the TensorFlow removal (Module 9).
+# Kept here so that any code still importing the old names does not break.
+save_keras_model = save_model
+
 
 def save_best_checkpoint_callback(
     model_name: str,
@@ -288,7 +285,7 @@ def save_best_checkpoint_callback(
     output_dir: Optional[str | Path] = None,
 ) -> None:
     """
-    Legacy stub — previously returned a ``tf.keras.callbacks.ModelCheckpoint``.
+    Legacy stub — previously returned a Keras ModelCheckpoint callback.
 
     Now a no-op: the training loop in ``train.py`` calls
     ``save_best_checkpoint(model, model_name)`` directly instead of

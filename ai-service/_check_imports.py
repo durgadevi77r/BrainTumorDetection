@@ -40,7 +40,7 @@ except Exception as e:
     checks.append(f"app.models.architectures: FAIL — {e}")
 
 try:
-    from app.models.save_model import save_keras_model, save_best_checkpoint, load_best_checkpoint
+    from app.models.save_model import save_model, save_best_checkpoint, load_best_checkpoint
     checks.append("app.models.save_model: OK")
 except Exception as e:
     checks.append(f"app.models.save_model: FAIL — {e}")

@@ -1,6 +1,10 @@
 """
 post_train_validate.py -- Auto-runs after training completes.
 
+DEPRECATED: This script uses TensorFlow/Keras and was part of the legacy
+training pipeline. The project has migrated to PyTorch. Use
+evaluation/evaluator.py or POST /api/v1/evaluate instead.
+
 1. Loads the Phase-2 best checkpoint into the model
 2. Saves efficientnet.keras + model_info.json
 3. Runs full test-set validation

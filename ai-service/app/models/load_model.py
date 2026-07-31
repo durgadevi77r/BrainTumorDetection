@@ -6,8 +6,8 @@ per process. Call clear_model_cache() between tests or when hot-reloading.
 
 Usage
 -----
-    from app.models.load_model import load_keras_model
-    model = load_keras_model("efficientnet")   # cached after first call
+    from app.models.load_model import load_model
+    model = load_model("mambavision")   # cached after first call
     preds = model.predict(tensor)
 """
 
@@ -50,7 +50,7 @@ def _resolve_model_path(model_name: str) -> Path:
     )
 
 
-def load_keras_model(model_name: Optional[str] = None) -> Any:
+def load_model(model_name: Optional[str] = None) -> Any:
     """
     Load (and cache) an image classifier from the ``saved_models`` directory.
 
@@ -112,7 +112,7 @@ def load_keras_model(model_name: Optional[str] = None) -> Any:
 
 def get_model_info(model_name: Optional[str] = None) -> Dict[str, Any]:
     """
-    Return the metadata written by ``save_keras_model()`` as a dict.
+    Return the metadata written by ``save_model()`` as a dict.
 
     Parameters
     ----------
@@ -174,3 +174,9 @@ def clear_model_cache(model_name: Optional[str] = None) -> None:
     else:
         _model_cache.clear()
         logger.info("Model cache cleared.")
+
+
+# ─── Backward-compatible alias ────────────────────────────────────────────────
+# Renamed from load_keras_model as part of the TensorFlow removal (Module 9).
+# Kept here so that any code still importing the old name does not break.
+load_keras_model = load_model

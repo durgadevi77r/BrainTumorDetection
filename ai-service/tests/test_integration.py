@@ -683,7 +683,7 @@ class TestErrorHandling:
     # ── Corrupted model files ─────────────────────────────────────────────────
 
     def test_predict_runtime_error_returns_500(self) -> None:
-        """RuntimeError from load_keras_model (corrupted weights) → 500."""
+        """RuntimeError from load_model (corrupted weights) → 500."""
         with patch("app.models.predict.predict",
                    side_effect=RuntimeError("Failed to load model: corrupted weights")):
             resp = client.post(
