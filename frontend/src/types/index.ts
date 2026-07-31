@@ -115,7 +115,7 @@ export interface Experiment {
 
 // ─── Models ───────────────────────────────────────────────────────────────
 
-export type ArchitectureName = 'cnn' | 'vgg16' | 'resnet50' | 'efficientnet';
+export type ArchitectureName = 'mambavision' | 'cnn' | 'vgg16' | 'resnet50' | 'efficientnet';
 
 export interface ModelInfo {
   name: ArchitectureName;

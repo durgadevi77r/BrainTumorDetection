@@ -154,7 +154,7 @@ export default function Detect() {
             <div>
               <p className="font-semibold text-pipeline-800">
                 {activeStep === 'preprocess' && 'Running ACEA contrast enhancement…'}
-                {activeStep === 'classify'   && 'Running AI inference (EfficientNet)…'}
+                {activeStep === 'classify'   && 'Running AI inference (MambaVision)…'}
                 {!activeStep                 && 'Processing…'}
               </p>
               <p className="text-xs text-pipeline-400 mt-0.5">

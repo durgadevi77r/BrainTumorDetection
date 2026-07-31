@@ -20,7 +20,7 @@ export default function SinglePrediction() {
   const { models } = useModels();
   const { toasts, addToast, dismissToast } = useToast();
 
-  const [modelName, setModelName] = useState<ArchitectureName>('efficientnet');
+  const [modelName, setModelName] = useState<ArchitectureName>('mambavision');
   const [topK, setTopK] = useState(3);
   const [generateGradcam, setGenerateGradcam] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);

@@ -37,6 +37,50 @@ const logger   = require('../utils/logger');
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
 /**
+ * Query the AI service health endpoint and return the name of the best
+ * available (trained) model to use for classification.
+ *
+ * Priority: whatever settings.active_model is set to on the AI side — but
+ * only if weights exist for it.  If not, fall back to the first architecture
+ * that does have weights.  Ultimately falls back to 'cnn'.
+ *
+ * The result is cached for 60 s so we don't hit /health on every request.
+ */
+let _modelCache   = null;
+let _modelCacheTs = 0;
+const MODEL_CACHE_TTL_MS = 60_000;
+
+async function getBestAvailableModel() {
+  const now = Date.now();
+  if (_modelCache && (now - _modelCacheTs) < MODEL_CACHE_TTL_MS) {
+    return _modelCache;
+  }
+  try {
+    const resp = await axios.get(`${AI_SERVICE_URL}/api/v1/health`, { timeout: 5_000 });
+    const health = resp.data;
+    const active    = health.active_model;
+    const available = health.models_available ?? {};
+
+    // Use active model if it has weights, else pick first available, else 'cnn'
+    let best = 'cnn';
+    if (available[active]) {
+      best = active;
+    } else {
+      const fallback = Object.keys(available).find((m) => available[m]);
+      if (fallback) best = fallback;
+    }
+
+    _modelCache   = best;
+    _modelCacheTs = now;
+    logger.info(`[CLASSIFY] Best available model resolved to: '${best}'`);
+    return best;
+  } catch (err) {
+    logger.warn(`[CLASSIFY] Could not query AI health, defaulting to 'cnn': ${err.message}`);
+    return 'cnn';
+  }
+}
+
+/**
  * Extract GLCM features via FastAPI and persist them.
  * Called automatically before classification so the Results page
  * always has features — even when the frontend skips POST /api/features.
@@ -101,7 +145,7 @@ router.post('/:imageId', validateImageId, async (req, res, next) => {
       });
     }
 
-    logger.info(`[CLASSIFY] Forwarding imageId=${imageId} to AI service — ${rawPath}`);
+    logger.info(`[CLASSIFY] Starting classification for imageId=${imageId} — ${rawPath}`);
 
     // ── Auto-extract GLCM features (use enhanced image if preprocessed) ───────
     const processedRow = db
@@ -113,11 +157,14 @@ router.post('/:imageId', validateImageId, async (req, res, next) => {
     await extractAndSaveFeatures(imageId, featureImagePath);
 
     // ── Build multipart/form-data for FastAPI ─────────────────────────────────
+    const modelName = await getBestAvailableModel();
+    logger.info(`[CLASSIFY] Forwarding imageId=${imageId} to AI service using model='${modelName}'`);
     const form = new FormData();
     form.append('image', fs.createReadStream(rawPath), {
       filename:    path.basename(rawPath),
       contentType: 'image/jpeg',
     });
+    form.append('model_name',      modelName);
     form.append('generate_gradcam', 'true');
 
     // ── Call FastAPI POST /api/v1/predict ─────────────────────────────────────

@@ -5,6 +5,7 @@
 import type { ArchitectureName, ModelInfo } from '@/types';
 
 const ARCH_LABELS: Record<string, string> = {
+  mambavision: 'MambaVision-T',
   cnn:         'Lightweight CNN',
   vgg16:       'VGG-16',
   resnet50:    'ResNet-50',
@@ -20,7 +21,7 @@ interface Props {
   id?: string;
 }
 
-const ALL_ARCHS: ArchitectureName[] = ['cnn', 'vgg16', 'resnet50', 'efficientnet'];
+const ALL_ARCHS: ArchitectureName[] = ['mambavision', 'cnn', 'vgg16', 'resnet50', 'efficientnet'];
 
 export default function ModelSelector({ value, onChange, models, disabled, label = 'Model', id = 'model-select' }: Props) {
   const available = new Set(models?.filter((m) => m.available).map((m) => m.name) ?? ALL_ARCHS);

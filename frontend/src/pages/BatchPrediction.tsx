@@ -19,7 +19,7 @@ export default function BatchPrediction() {
   const { toasts, addToast, dismissToast } = useToast();
 
   const [mode, setMode] = useState<BatchMode>('files');
-  const [modelName, setModelName] = useState<ArchitectureName>('efficientnet');
+  const [modelName, setModelName] = useState<ArchitectureName>('mambavision');
   const [topK, setTopK] = useState(1);
 
   const handleSubmit = async (payload: File | File[]) => {
