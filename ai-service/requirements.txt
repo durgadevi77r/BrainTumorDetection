@@ -25,6 +25,7 @@ einops==0.8.1       # required by the nvidia/MambaVision HF model code
 # ─── Computer Vision ──────────────────────────────────────────────────────────
 opencv-python-headless==4.10.0.84
 Pillow==11.0.0
+scikit-image==0.24.0        # GLCM texture feature extraction (Eq. 8–14)
 
 # ─── Numerical / Data ─────────────────────────────────────────────────────────
 numpy==2.1.3

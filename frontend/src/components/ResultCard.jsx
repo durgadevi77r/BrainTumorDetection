@@ -24,6 +24,15 @@ const CLASS_LABELS = {
   abnormal:    'Abnormal',
 };
 
+// Human-readable display names for each architecture key
+const MODEL_DISPLAY_NAMES = {
+  mambavision: 'MambaVision-T',
+  cnn:         'Lightweight CNN',
+  vgg16:       'VGG-16',
+  resnet50:    'ResNet-50',
+  efficientnet:'EfficientNetB3',
+};
+
 const CLASS_COLORS = {
   glioma:     { bg: 'bg-red-50',    border: 'border-red-200',    text: 'text-red-700',    bar: 'bg-red-500',    icon: 'text-red-600'    },
   meningioma: { bg: 'bg-orange-50', border: 'border-orange-200', text: 'text-orange-700', bar: 'bg-orange-500', icon: 'text-orange-600' },
@@ -41,6 +50,9 @@ export default function ResultCard({ predictedClass, confidence, probabilities, 
   const label     = CLASS_LABELS[key] ?? predictedClass ?? '—';
   const palette   = CLASS_COLORS[key] ?? DEFAULT_PALETTE;
   const pct       = confidence != null ? (confidence * 100).toFixed(1) : null;
+  const modelLabel = modelUsed
+    ? (MODEL_DISPLAY_NAMES[modelUsed.toLowerCase()] ?? modelUsed)
+    : null;
 
   // Sort probabilities descending for display
   const probEntries = probabilities
@@ -74,8 +86,8 @@ export default function ResultCard({ predictedClass, confidence, probabilities, 
           </p>
           <p className={`text-sm mt-1 ${palette.text} opacity-80`}>
             Predicted class: <span className="font-semibold">{label}</span>
-            {modelUsed && (
-              <span className="ml-2 text-xs opacity-60 font-mono">({modelUsed})</span>
+            {modelLabel && (
+              <span className="ml-2 text-xs opacity-60 font-mono">({modelLabel})</span>
             )}
           </p>
 

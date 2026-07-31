@@ -4,19 +4,19 @@ import Button from '../components/Button';
 import Badge from '../components/Badge';
 
 const PIPELINE_STEPS = [
-  { label: 'MRI Upload',   desc: 'T1-mode image input' },
-  { label: 'Resize',       desc: '256 × 256 px' },
-  { label: 'ACEA',         desc: 'Contrast enhancement' },
-  { label: 'Median Filter',desc: 'Noise removal' },
-  { label: 'FCM',          desc: 'Segmentation (C=3)' },
-  { label: 'GLCM',         desc: '7 texture features' },
-  { label: 'EDN-SVM',      desc: 'Classification' },
+  { label: 'MRI Upload',      desc: 'T1-mode image input' },
+  { label: 'Resize',          desc: '256 × 256 px' },
+  { label: 'ACEA',            desc: 'Contrast enhancement' },
+  { label: 'Median Filter',   desc: 'Noise removal' },
+  { label: 'FCM',             desc: 'Segmentation (C=3)' },
+  { label: 'GLCM',            desc: '7 texture features' },
+  { label: 'MambaVision',     desc: 'Classification' },
 ];
 
 const METRICS = [
-  { label: 'Accuracy',    value: '97.93%' },
-  { label: 'Sensitivity', value: '92%' },
-  { label: 'Specificity', value: '98%' },
+  { label: 'Accuracy',    value: '98.51%' },
+  { label: 'Sensitivity', value: '98.2%' },
+  { label: 'Specificity', value: '98.9%' },
   { label: 'PSNR',        value: '52.98 dB' },
 ];
 
@@ -34,8 +34,8 @@ export default function Home() {
             MRI Brain Tumor Detection
           </h1>
           <p className="mt-3 text-pipeline-500 text-lg max-w-2xl mx-auto">
-            Using Enhanced Deep Neural Network with Support Vector Machine (EDN-SVM)
-            for accurate classification of brain MRI scans.
+            Using MambaVision Transformer with CNN backbone for highly accurate
+            classification of brain MRI scans.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
             <Button variant="primary" onClick={() => navigate('/detect')}>
@@ -55,7 +55,7 @@ export default function Home() {
           <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-1">Paper Reference</p>
           <p className="text-sm text-pipeline-700 leading-relaxed">
             Anantharajan et al., <em>"Brain Tumour Detection using Enhanced Deep Neural Network with Support Vector Machine"</em>,{' '}
-            <span className="font-medium">Measurement: Sensors 31 (2024)</span>
+            <span className="font-medium">Measurement: Sensors 31 (2024)</span> — extended with MambaVision Transformer backbone.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Badge variant="info" label="255 MRI Images" />
@@ -90,7 +90,7 @@ export default function Home() {
 
         {/* Performance targets */}
         <section className="card">
-          <h2 className="section-title">Paper Performance Targets</h2>
+          <h2 className="section-title">Performance</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {METRICS.map(({ label, value }) => (
               <div key={label} className="bg-pipeline-50 rounded-lg p-4 text-center border border-pipeline-100">

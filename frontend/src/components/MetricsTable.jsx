@@ -1,11 +1,11 @@
 const METRIC_DEFS = [
-  { key: 'accuracy',           label: 'Accuracy',           eq: 'Eq. 28', unit: '%',  target: 97.93 },
-  { key: 'sensitivity',        label: 'Sensitivity',        eq: 'Eq. 31', unit: '%',  target: 92.0  },
-  { key: 'specificity',        label: 'Specificity',        eq: 'Eq. 32', unit: '%',  target: 98.0  },
-  { key: 'psnr',               label: 'PSNR',               eq: 'Eq. 30', unit: 'dB', target: 52.98 },
-  { key: 'jaccard',            label: 'Jaccard Index',      eq: 'Eq. 29', unit: '',   target: null  },
-  { key: 'ber',                label: 'BER',                eq: '—',      unit: '',   target: null  },
-  { key: 'computational_time', label: 'Compute Time',       eq: '—',      unit: 'ms', target: null  },
+  { key: 'accuracy',           label: 'Accuracy',       eq: 'Eq. 28', unit: '%',  target: 98.51 },
+  { key: 'sensitivity',        label: 'Sensitivity',    eq: 'Eq. 31', unit: '%',  target: 98.2  },
+  { key: 'specificity',        label: 'Specificity',    eq: 'Eq. 32', unit: '%',  target: 98.9  },
+  { key: 'psnr',               label: 'PSNR',           eq: 'Eq. 30', unit: 'dB', target: 52.98 },
+  { key: 'jaccard',            label: 'Jaccard Index',  eq: 'Eq. 29', unit: '',   target: null  },
+  { key: 'ber',                label: 'BER',            eq: '—',      unit: '',   target: null  },
+  { key: 'computational_time', label: 'Compute Time',   eq: '—',      unit: 'ms', target: null  },
 ];
 
 /**

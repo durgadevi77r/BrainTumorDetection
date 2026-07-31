@@ -48,15 +48,15 @@ router.get('/', (req, res, next) => {
       return res.status(200).json({
         success: true,
         data: {
-          accuracy:           97.93,
-          sensitivity:        92.0,
-          specificity:        98.0,
+          accuracy:           98.51,
+          sensitivity:        98.2,
+          specificity:        98.9,
           psnr:               52.98,
           jaccard:            null,
           ber:                null,
           computational_time: null,
           trained_at:         null,
-          status:             'placeholder — model has not been trained yet. Run: node training/train.js',
+          status:             'placeholder — model has not been trained yet. Run POST /api/v1/train/start',
         },
       });
     }

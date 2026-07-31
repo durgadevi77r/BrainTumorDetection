@@ -3,11 +3,11 @@ import {
 } from 'recharts';
 
 const COLORS = {
-  CNN:     '#94a3b8',
-  RFC:     '#64748b',
-  ANN:     '#475569',
-  'R-CNN': '#334155',
-  'EDN-SVM': '#2563eb',
+  CNN:          '#94a3b8',
+  RFC:          '#64748b',
+  ANN:          '#475569',
+  'R-CNN':      '#334155',
+  MambaVision:  '#2563eb',
 };
 
 const METRIC_LABELS = {

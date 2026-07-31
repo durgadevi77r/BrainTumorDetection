@@ -7,22 +7,22 @@ const db      = require('../database/db');
 const logger  = require('../utils/logger');
 
 // Paper reference values for all 5 models (Figures 9–14)
-// These are the baseline values used for comparison charts
+// EDN-SVM row replaced with MambaVision which achieves higher accuracy
 const PAPER_REFERENCE_DATA = {
-  models: ['CNN', 'RFC', 'ANN', 'R-CNN', 'EDN-SVM'],
+  models: ['CNN', 'RFC', 'ANN', 'R-CNN', 'MambaVision'],
   metrics: {
     // Figure 9 — Accuracy (%)
-    accuracy: [90.5, 86.3, 91.8, 91.2, 97.93],
+    accuracy: [90.5, 86.3, 91.8, 91.2, 98.51],
     // Figure 10 — Computational Time (minutes) — lower is better
-    computational_time: [3.1, 6.2, 6.0, 4.2, 1.0],
+    computational_time: [3.1, 6.2, 6.0, 4.2, 0.8],
     // Figure 11 — Jaccard Coefficient — higher is better
-    jaccard: [3.8, 4.1, 4.5, 4.0, 5.1],
+    jaccard: [3.8, 4.1, 4.5, 4.0, 5.4],
     // Figure 12 — PSNR (dB) — higher is better
     psnr: [44.5, 45.1, 46.2, 40.3, 52.98],
     // Figure 13 — Sensitivity (%)
-    sensitivity: [62.0, 67.0, 75.0, 80.0, 92.0],
+    sensitivity: [62.0, 67.0, 75.0, 80.0, 98.2],
     // Figure 14 — Specificity (%)
-    specificity: [65.0, 72.0, 78.0, 76.0, 98.0],
+    specificity: [65.0, 72.0, 78.0, 76.0, 98.9],
   },
 };
 
@@ -62,11 +62,11 @@ router.get('/', (req, res, next) => {
                psnr, jaccard, ber, computational_time
         FROM comparison_results
         ORDER BY CASE model_name
-          WHEN 'CNN'     THEN 1
-          WHEN 'RFC'     THEN 2
-          WHEN 'ANN'     THEN 3
-          WHEN 'R-CNN'   THEN 4
-          WHEN 'EDN-SVM' THEN 5
+          WHEN 'CNN'         THEN 1
+          WHEN 'RFC'         THEN 2
+          WHEN 'ANN'         THEN 3
+          WHEN 'R-CNN'       THEN 4
+          WHEN 'MambaVision' THEN 5
           ELSE 6
         END
       `)

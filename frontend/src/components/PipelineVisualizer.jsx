@@ -1,9 +1,11 @@
 const STEPS = [
-  { key: 'upload',     label: 'Upload',      desc: 'MRI image received' },
-  { key: 'preprocess', label: 'Preprocess',  desc: 'Resize · ACEA · Median Filter' },
-  { key: 'segment',    label: 'Segment',     desc: 'Fuzzy C-Means (C=3)' },
-  { key: 'features',   label: 'Features',    desc: 'GLCM (7 features)' },
-  { key: 'classify',   label: 'Classify',    desc: 'EDN-SVM prediction' },
+  { key: 'upload',     label: 'Upload',        desc: 'T1-mode image input' },
+  { key: 'resize',     label: 'Resize',        desc: '256 × 256 px' },
+  { key: 'preprocess', label: 'ACEA',          desc: 'Contrast enhancement' },
+  { key: 'denoise',    label: 'Median Filter', desc: 'Noise removal' },
+  { key: 'segment',    label: 'FCM',           desc: 'Segmentation (C=3)' },
+  { key: 'features',   label: 'GLCM',          desc: '7 texture features' },
+  { key: 'classify',   label: 'MambaVision',   desc: 'Classification' },
 ];
 
 /**

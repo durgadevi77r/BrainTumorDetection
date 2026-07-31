@@ -66,15 +66,21 @@ export default function Detect() {
   const runPipeline = async (imageId) => {
     setError('');
 
-    // ── Step 1: Preprocess (resize + ACEA) ───────────────────────────────────
-    setActiveStep('preprocess');
+    // ── Step 1: Preprocess (resize + ACEA + denoise) ─────────────────────────
+    setActiveStep('resize');
     setIsLoading(true);
     try {
       const res  = await preprocessImage(imageId);
       const data = res?.data ?? res;
+      // Mark resize → ACEA → denoise → segment → features all done
+      // (backend runs them as one call; visualizer steps are informational)
+      markDone('resize');
       markDone('preprocess');
+      markDone('denoise');
+      markDone('segment');
+      markDone('features');
       setPreprocessResult(data);
-      addToast('success', 'ACEA contrast enhancement complete.');
+      addToast('success', 'Preprocessing complete — ACEA · Median Filter · FCM · GLCM');
     } catch (err) {
       const msg = err.message || 'Preprocessing failed.';
       setError(msg);
@@ -84,14 +90,13 @@ export default function Detect() {
       return;
     }
 
-    // ── Step 2: Classify (calls FastAPI AI service) ──────────────────────────
+    // ── Step 2: Classify (MambaVision / CNN via AI service) ──────────────────
     setActiveStep('classify');
     try {
       const res  = await classifyImage(imageId);
       const data = res?.data ?? res;
       markDone('classify');
       addToast('success', `AI prediction: ${data.predicted_class} (${(data.confidence * 100).toFixed(1)}%)`);
-      // Navigate to results page
       navigate(`/results?imageId=${imageId}`);
     } catch (err) {
       const msg = err.message || 'Classification failed.';
@@ -153,13 +158,13 @@ export default function Detect() {
             <LoadingSpinner size="md" message="" />
             <div>
               <p className="font-semibold text-pipeline-800">
-                {activeStep === 'preprocess' && 'Running ACEA contrast enhancement…'}
-                {activeStep === 'classify'   && 'Running AI inference (MambaVision)…'}
-                {!activeStep                 && 'Processing…'}
+                {activeStep === 'resize'   && 'Resizing to 256×256 · ACEA · Median Filter…'}
+                {activeStep === 'classify' && 'Running MambaVision inference…'}
+                {!activeStep               && 'Processing…'}
               </p>
               <p className="text-xs text-pipeline-400 mt-0.5">
-                {activeStep === 'preprocess' && 'Resize → 256×256 · Adaptive contrast stretch (Eq. 1)'}
-                {activeStep === 'classify'   && 'Deep learning prediction + Grad-CAM heatmap generation'}
+                {activeStep === 'resize'   && 'Adaptive contrast stretch · denoising · FCM segmentation · GLCM features'}
+                {activeStep === 'classify' && 'Deep learning classification + Grad-CAM heatmap generation'}
               </p>
             </div>
           </div>

@@ -1,0 +1,12 @@
+$imageId = "12c278de-5f12-4de2-b76a-cbd165c511ec"
+$r = Invoke-RestMethod -Uri "http://localhost:5000/api/results/$imageId"
+$f = $r.data.features
+Write-Host "pipeline_complete : $($r.data.pipeline_complete)"
+Write-Host "GLCM entropy      : $($f.entropy)"
+Write-Host "GLCM correlation  : $($f.correlation)"
+Write-Host "GLCM energy       : $($f.energy)"
+Write-Host "GLCM contrast     : $($f.contrast)"
+Write-Host "GLCM mean         : $($f.mean)"
+Write-Host "GLCM std_dev      : $($f.std_dev)"
+Write-Host "GLCM variance     : $($f.variance)"
+Write-Host "model_used        : $($r.data.result.model_used)"
