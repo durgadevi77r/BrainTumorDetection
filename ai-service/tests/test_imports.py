@@ -18,7 +18,8 @@ THIRD_PARTY = [
     "torch",
     "torchvision",
     "transformers",
-    "mambavision",
+    # "mambavision" is not a separate pip package — it ships as the local
+    # app.models.mambavision sub-package and is tested via APP_MODULES below.
     "cv2",
     "numpy",
     "pandas",

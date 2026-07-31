@@ -227,6 +227,19 @@ def build_eval_datagen(image_size: int = 224) -> transforms.Compose:
     return build_eval_transform(image_size=image_size)
 
 
+def build_train_datagen(
+    aug_cfg: Optional["AugmentationConfig"] = None,
+    image_size: int = 224,
+) -> transforms.Compose:
+    """
+    Convenience alias for ``build_train_transform()``.
+
+    Kept for backward compatibility with callers that used
+    ``from app.preprocessing.augmentation import build_train_datagen``.
+    """
+    return build_train_transform(aug_cfg=aug_cfg, image_size=image_size)
+
+
 # ── MRIDataset ────────────────────────────────────────────────────────────────
 
 class MRIDataset(Dataset):

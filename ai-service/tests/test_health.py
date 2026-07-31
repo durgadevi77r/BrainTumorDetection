@@ -69,7 +69,7 @@ class TestHealthEndpoint:
 
     def test_models_available_covers_all_architectures(self) -> None:
         body = client.get("/api/v1/health").json()
-        expected_keys = {"cnn", "vgg16", "resnet50", "efficientnet"}
+        expected_keys = {"mambavision", "cnn", "vgg16", "resnet50", "efficientnet"}
         assert expected_keys == set(body["models_available"].keys())
 
     def test_models_available_values_are_bools(self) -> None:
@@ -90,6 +90,14 @@ class TestHealthEndpoint:
         body = client.get("/api/v1/health").json()
         assert isinstance(body["image_size"], int)
         assert body["image_size"] > 0
+
+    def test_active_model_is_in_models_available(self) -> None:
+        """The model reported as active_model must always have an entry in models_available."""
+        body = client.get("/api/v1/health").json()
+        assert body["active_model"] in body["models_available"], (
+            f"active_model '{body['active_model']}' is missing from models_available "
+            f"(keys present: {list(body['models_available'].keys())})"
+        )
 
 
 # ─── /predict ─────────────────────────────────────────────────────────────────
@@ -207,9 +215,15 @@ class TestTrainEndpoint:
         assert response.status_code == 422
 
     def test_default_payload_is_valid(self) -> None:
-        """A default body passes Pydantic validation (will fail on missing dataset)."""
-        response = client.post("/api/v1/train", headers=_admin_headers(), json={})
-        # 404 (no dataset) or 500 — not 422 (payload is valid)
+        """A default body passes Pydantic validation (will fail on missing model weights)."""
+        from unittest.mock import patch
+        # Patch train_model so no real training (model download + GPU) is triggered.
+        # The test only asserts that the payload passes Pydantic validation, not
+        # that training succeeds. We expect 404/500 (no weights) or, if mocked, 200.
+        with patch("app.models.train.train_model",
+                   side_effect=FileNotFoundError("No dataset — test environment")):
+            response = client.post("/api/v1/train", headers=_admin_headers(), json={})
+        # 404 (mocked FileNotFoundError) or 422 (Pydantic rejection) — never 422
         assert response.status_code in (404, 500)
 
     def test_unauthenticated_returns_401(self) -> None:
@@ -241,7 +255,11 @@ class TestEvaluateEndpoint:
         assert response.status_code == 422
 
     def test_default_payload_is_valid(self) -> None:
-        response = client.post("/api/v1/evaluate", headers=_admin_headers(), json={})
+        from unittest.mock import patch
+        # Patch evaluate_model so no real inference (model download + dataset) runs.
+        with patch("app.models.evaluate.evaluate_model",
+                   side_effect=FileNotFoundError("No model weights — test environment")):
+            response = client.post("/api/v1/evaluate", headers=_admin_headers(), json={})
         assert response.status_code in (404, 500)
 
     def test_unauthenticated_returns_401(self) -> None:

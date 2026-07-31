@@ -466,14 +466,34 @@ def build_data_generators(
     dataset_dir = Path(dataset_dir)
     train_dir   = dataset_dir / "train"
 
-    # Fall back to the canonical processed dir if train/ is not present
+    # When the caller supplied an explicit path, honour it strictly.
+    # Only fall back to the canonical processed dir when the caller passes
+    # the canonical processed dir itself (or a subdirectory of it), i.e.
+    # when no explicit override was intended.
+    if not dataset_dir.exists():
+        raise FileNotFoundError(
+            f"Dataset directory not found: '{dataset_dir}'. "
+            "Ensure the processed dataset exists or run POST /api/v1/dataset/prepare first."
+        )
+
     if not train_dir.exists():
-        processed = settings.dataset_processed_dir
+        # If the caller explicitly specified a non-default path that has no
+        # train/ sub-directory, raise immediately rather than falling back
+        # silently — this is almost certainly a configuration error.
+        canonical = settings.dataset_processed_dir
+        if dataset_dir.resolve() != canonical.resolve():
+            raise FileNotFoundError(
+                f"Training directory not found: '{train_dir}'. "
+                "The dataset root must contain a 'train/' sub-directory. "
+                "Run POST /api/v1/dataset/prepare to create the split layout."
+            )
+        # Caller passed the canonical dir but it has no train/ yet — fall back
+        # (will raise later inside build_data_generators_from_split)
         logger.warning(
             f"build_data_generators: '{dataset_dir}/train' not found — "
-            f"falling back to '{processed}'"
+            f"falling back to '{canonical}'"
         )
-        dataset_dir = processed
+        dataset_dir = canonical
 
     cfg = PreprocessConfig(
         image_size=target_size or DEFAULT_CONFIG.image_size,
@@ -493,4 +513,5 @@ def build_data_generators(
 normalize_image       = _normalize
 apply_median_filter   = _median
 apply_clahe_transform = _clahe   # renamed to avoid shadowing cv2 clahe
+apply_clahe           = _clahe   # backward-compat alias
 resize_image          = _resize

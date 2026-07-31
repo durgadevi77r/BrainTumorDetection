@@ -64,6 +64,11 @@ def __getattr__(name: str):  # type: ignore[misc]
         "preprocess_image",
         "preprocess_image_for_gradcam",
         "build_data_generators",
+        "apply_clahe",
+        "apply_clahe_transform",
+        "normalize_image",
+        "apply_median_filter",
+        "resize_image",
     }
     if name in _aug_names:
         from app.preprocessing import augmentation as _aug

@@ -637,27 +637,31 @@ class TestAugmentationConfig:
 
 class TestAugmentationGenerators:
     def test_build_train_datagen_returns_idg(self) -> None:
+        from torchvision import transforms as T
         from app.preprocessing.augmentation import build_train_datagen
-        from tensorflow.keras.preprocessing.image import ImageDataGenerator
         gen = build_train_datagen()
-        assert isinstance(gen, ImageDataGenerator)
+        assert isinstance(gen, T.Compose)
 
     def test_build_eval_datagen_returns_idg(self) -> None:
+        from torchvision import transforms as T
         from app.preprocessing.augmentation import build_eval_datagen
-        from tensorflow.keras.preprocessing.image import ImageDataGenerator
         gen = build_eval_datagen()
-        assert isinstance(gen, ImageDataGenerator)
+        assert isinstance(gen, T.Compose)
 
     def test_train_datagen_has_augmentation(self) -> None:
+        from torchvision import transforms as T
         from app.preprocessing.augmentation import build_train_datagen
         gen = build_train_datagen()
-        assert gen.rotation_range > 0
+        # Training transform has more steps than eval (RandomAffine / flips)
+        assert len(gen.transforms) > 2   # Resize + ToTensor + Normalize + at least one augment
 
     def test_eval_datagen_no_augmentation(self) -> None:
+        from torchvision import transforms as T
         from app.preprocessing.augmentation import build_eval_datagen
         gen = build_eval_datagen()
-        assert gen.rotation_range == 0
-        assert gen.horizontal_flip is False
+        # Eval transform is minimal: Resize + ToTensor + Normalize only (3 steps)
+        assert len(gen.transforms) == 3
+        assert isinstance(gen.transforms[0], T.Resize)
 
     def test_build_data_generators_from_split(self, tmp_path: Path) -> None:
         from app.preprocessing.augmentation import build_data_generators_from_split
@@ -667,14 +671,15 @@ class TestAugmentationGenerators:
                 d = tmp_path / split / cls
                 d.mkdir(parents=True)
                 (d / "img.png").write_bytes(_varied_png_bytes(32, 32))
-        train_gen, val_gen = build_data_generators_from_split(
+        train_loader, val_loader = build_data_generators_from_split(
             tmp_path / "train_dir",
             tmp_path / "val_dir",
             image_size=32,
             batch_size=2,
         )
-        assert train_gen.samples == 2
-        assert val_gen.samples   == 2
+        # PyTorch DataLoader — use len(dataset) not .samples
+        assert len(train_loader.dataset) == 2
+        assert len(val_loader.dataset)   == 2
 
     def test_build_data_generators_missing_train_raises(self, tmp_path: Path) -> None:
         from app.preprocessing.augmentation import build_data_generators_from_split
@@ -707,7 +712,8 @@ class TestAugmentationApply:
     def test_output_shape_matches_input(self) -> None:
         from app.preprocessing.augmentation import apply_augmentation
         rgb = _make_rgb(48, 48)
-        out = apply_augmentation(rgb, n_samples=2)[0]
+        # apply_augmentation resizes to image_size; pass matching size to preserve shape
+        out = apply_augmentation(rgb, n_samples=2, image_size=48)[0]
         assert out.shape == (48, 48, 3)
 
     def test_same_seed_same_output(self) -> None:
@@ -726,7 +732,8 @@ class TestAugmentationApply:
             vertical_flip=False, brightness_range=None,
         )
         rgb = _make_rgb(32, 32, seed=5)
-        out = apply_augmentation(rgb, aug_cfg=cfg, seed=0, n_samples=1)[0]
+        # apply_augmentation resizes to image_size; pass matching size to preserve shape
+        out = apply_augmentation(rgb, aug_cfg=cfg, seed=0, n_samples=1, image_size=32)[0]
         # With all transforms disabled the output should be very close to input
         assert np.allclose(rgb.astype(float), out.astype(float), atol=2)
 

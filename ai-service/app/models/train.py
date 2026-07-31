@@ -230,6 +230,38 @@ def train_model(
     classes = settings.classes
 
     data_dir = Path(dataset_dir) if dataset_dir else settings.dataset_processed_dir
+
+    # Validate the dataset directory before doing anything expensive.
+    # build_data_generators raises FileNotFoundError when the path or its
+    # train/ sub-directory are absent, but only after an implicit fallback
+    # attempt.  Raising early here gives a clearer error message and avoids
+    # any accidental fallback when the caller explicitly passed a bad path.
+    if dataset_dir is not None and not data_dir.exists():
+        raise FileNotFoundError(
+            f"Dataset directory not found: '{data_dir}'. "
+            "Ensure the processed dataset exists or run POST /api/v1/dataset/prepare first."
+        )
+
+    # Require the train/ sub-directory to exist and contain at least one image.
+    # This prevents expensive model downloads on empty / un-prepared datasets.
+    train_dir = data_dir / "train"
+    if not train_dir.exists():
+        raise FileNotFoundError(
+            f"Training directory not found: '{train_dir}'. "
+            "Run POST /api/v1/dataset/prepare to create the train/val/test split."
+        )
+    _image_exts = {".jpg", ".jpeg", ".png", ".bmp"}
+    _has_images = any(
+        p.suffix.lower() in _image_exts
+        for p in train_dir.rglob("*")
+        if p.is_file()
+    )
+    if not _has_images:
+        raise FileNotFoundError(
+            f"No images found in training directory '{train_dir}'. "
+            "Ensure the dataset has been prepared and split before training."
+        )
+
     logger.info(
         f"Training started | model={name} epochs={epochs} "
         f"batch={batch_size} lr={learning_rate} dataset={data_dir} device={device}"

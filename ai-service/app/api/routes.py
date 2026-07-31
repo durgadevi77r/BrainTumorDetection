@@ -139,7 +139,7 @@ def health_check() -> HealthResponse:
     """
     from app.models.load_model import is_model_available
 
-    supported = ["cnn", "vgg16", "resnet50", "efficientnet"]
+    supported = ["mambavision", "cnn", "vgg16", "resnet50", "efficientnet"]
     models_available = {m: is_model_available(m) for m in supported}
 
     return HealthResponse(
