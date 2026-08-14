@@ -149,7 +149,7 @@ class TestPredictEndpoint:
         response = client.post(
             "/api/v1/predict",
             files={"image": ("test.png", self._png_bytes(), "image/png")},
-            data={"model_name": "cnn"},
+            data={"model_name": "vgg16"},
         )
         # 404 when weights missing, 500 if something else goes wrong
         assert response.status_code in (404, 500)

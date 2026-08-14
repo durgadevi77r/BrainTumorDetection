@@ -1102,7 +1102,7 @@ class TestInferenceAPIRoutes:
         resp = client.post(
             "/api/v1/predict/image",
             files={"image": ("scan.png", _varied_png_bytes(), "image/png")},
-            data={"model_name": "cnn"},
+            data={"model_name": "vgg16"},
         )
         assert resp.status_code in (404, 500)
 
@@ -1351,7 +1351,7 @@ class TestInferenceAPIRoutes:
     def test_reload_model_no_weights_returns_404(self) -> None:
         resp = client.post(
             "/api/v1/models/reload",
-            json={"model_name": "cnn"},
+            json={"model_name": "vgg16"},
         )
         assert resp.status_code == 404
 

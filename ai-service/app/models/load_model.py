@@ -52,19 +52,25 @@ def _resolve_model_path(model_name: str) -> Tuple[Path, _Format]:
 
     Search order
     ------------
-    1. ``saved_models/<model_name>/config.json``  → HF format (directory path)
-    2. ``saved_models/<model_name>/weights.pt``   → PT format (file path)
+    1. ``saved_models/<model_name>/config.json``              → HF format
+    2. ``saved_models/<model_name>/weights.pt``               → PT format
+    3. ``saved_models/<model_name>/checkpoints/best_weights.pt``  → PT fallback
+       (used when training completed but save_model() was not called, e.g.
+        an interrupted run that only wrote a best-checkpoint file)
+    4. ``saved_models/<model_name>/checkpoints/<exp_id>/best_weights.pt``
+       (experiment-scoped checkpoint written by the Trainer)
 
     Returns
     -------
     (path, format)
-        *path* is the model directory for HF, or the ``weights.pt`` file for PT.
+        *path* is the model directory for HF, or the ``weights.pt``/
+        ``best_weights.pt`` file for PT.
         *format* is ``"hf"`` or ``"pt"``.
 
     Raises
     ------
     FileNotFoundError
-        When neither artefact can be found for the given model name.
+        When no artefact can be found for the given model name.
     """
     base: Path = settings.saved_models_dir
     model_dir = base / model_name
@@ -74,15 +80,49 @@ def _resolve_model_path(model_name: str) -> Tuple[Path, _Format]:
         logger.debug(f"_resolve_model_path: '{model_name}' → HF format at {model_dir}")
         return model_dir, "hf"
 
-    # ── PT format: directory containing weights.pt ────────────────────────────
+    # ── PT format: primary weights.pt ────────────────────────────────────────
     weights_file = model_dir / "weights.pt"
     if model_dir.is_dir() and weights_file.is_file():
         logger.debug(f"_resolve_model_path: '{model_name}' → PT format at {weights_file}")
         return weights_file, "pt"
 
+    # ── PT fallback: checkpoints/best_weights.pt ──────────────────────────────
+    # Handles the case where training completed but save_model() was never
+    # called (e.g. an interrupted run, or efficientnet whose .keras file is
+    # not loadable by the PyTorch loader).
+    best_ckpt = model_dir / "checkpoints" / "best_weights.pt"
+    if model_dir.is_dir() and best_ckpt.is_file():
+        logger.warning(
+            f"_resolve_model_path: '{model_name}' — no primary weights found; "
+            f"falling back to checkpoint at {best_ckpt}"
+        )
+        return best_ckpt, "pt"
+
+    # ── PT fallback: experiment-scoped checkpoints/<exp_id>/best_weights.pt ──
+    ckpt_dir = model_dir / "checkpoints"
+    if ckpt_dir.is_dir():
+        # Pick the most recently modified experiment checkpoint
+        exp_ckpts = sorted(
+            [
+                p / "best_weights.pt"
+                for p in ckpt_dir.iterdir()
+                if p.is_dir() and (p / "best_weights.pt").is_file()
+            ],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if exp_ckpts:
+            chosen = exp_ckpts[0]
+            logger.warning(
+                f"_resolve_model_path: '{model_name}' — using experiment checkpoint "
+                f"at {chosen}"
+            )
+            return chosen, "pt"
+
     raise FileNotFoundError(
         f"No saved model found for '{model_name}' in {base}. "
-        "Expected either 'config.json' (HF format) or 'weights.pt' (PT format). "
+        "Expected 'config.json' (HF format), 'weights.pt' (PT format), "
+        "or 'checkpoints/best_weights.pt'. "
         "Train the model first via POST /api/v1/train."
     )
 

@@ -22,7 +22,7 @@ import numpy as np
 from app.core.config import settings
 from app.core.logging import logger
 from app.models.load_model import load_model
-from app.preprocessing.preprocess import preprocess_image
+from app.preprocessing.preprocess import preprocess_for_inference
 
 
 def predict(
@@ -70,28 +70,66 @@ def predict(
     img_id   = image_id or str(uuid.uuid4())
     classes  = settings.classes
 
+    # ── Diagnostic: checkpoint metadata ──────────────────────────────────────
+    from app.models.load_model import get_model_info
+    model_info = get_model_info(name)
+    logger.info(
+        "[predict:diag] model=%s | checkpoint_classes=%s | "
+        "checkpoint_num_classes=%s | runtime_classes=%s",
+        name,
+        model_info.get("class_names", "unknown"),
+        model_info.get("num_classes", "unknown"),
+        classes,
+    )
+
     # ── Load model (cached) ───────────────────────────────────────────────────
     model = load_model(name)
 
     # ── Preprocess ────────────────────────────────────────────────────────────
-    tensor = preprocess_image(source, expand_dims=True)   # (1, H, W, C)
+    # preprocess_for_inference produces NHWC float32 in [0, 1] with
+    # apply_denoise=False and apply_clahe=False (DEFAULT_CONFIG defaults),
+    # matching the build_eval_transform used during training exactly.
+    # TorchImageClassifier._to_tensor() then applies the ImageNet z-score.
+    tensor = preprocess_for_inference(source, expand_dims=True)   # (1, H, W, C)
+
+    # ── Diagnostic: input tensor stats ───────────────────────────────────────
+    logger.info(
+        "[predict:diag] image_id=%s | tensor_shape=%s | "
+        "tensor_min=%.4f | tensor_max=%.4f | tensor_mean=%.4f",
+        img_id,
+        tensor.shape,
+        float(tensor.min()),
+        float(tensor.max()),
+        float(tensor.mean()),
+    )
 
     # ── Inference ─────────────────────────────────────────────────────────────
-    raw_preds: np.ndarray = model.predict(tensor, verbose=0)  # (1, num_classes)
+    raw_preds: np.ndarray = model.predict(tensor, verbose=1)  # (1, num_classes)
     probs: np.ndarray     = raw_preds[0]                      # (num_classes,)
 
-    top_idx     = int(np.argmax(probs))
-    top_label   = classes[top_idx]
-    confidence  = round(float(probs[top_idx]), 4)
+    top_idx    = int(np.argmax(probs))
+    top_label  = classes[top_idx]
+    confidence = round(float(probs[top_idx]), 4)
 
     probabilities = {
         label: round(float(probs[i]), 4)
         for i, label in enumerate(classes)
     }
 
+    # ── Diagnostic: raw model output ─────────────────────────────────────────
     logger.info(
-        f"Prediction | model={name} class={top_label} "
-        f"confidence={confidence:.4f} image_id={img_id}"
+        "[predict:diag] image_id=%s | raw_probs=%s | "
+        "top_idx=%d | top_label=%s | confidence=%.4f",
+        img_id,
+        [round(float(p), 4) for p in probs],
+        top_idx,
+        top_label,
+        confidence,
+    )
+
+    logger.info(
+        "Prediction | model=%s class=%s confidence=%.4f image_id=%s",
+        name, top_label, confidence, img_id,
     )
 
     # ── Grad-CAM ──────────────────────────────────────────────────────────────
@@ -108,7 +146,7 @@ def predict(
             gradcam_path = result.get("gradcam_path")
         except Exception as exc:
             # Grad-CAM failure is non-fatal — log and continue
-            logger.warning(f"Grad-CAM generation failed for {img_id}: {exc}")
+            logger.warning("Grad-CAM generation failed for %s: %s", img_id, exc)
 
     return {
         "class":         top_label,

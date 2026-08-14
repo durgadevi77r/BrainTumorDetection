@@ -94,21 +94,32 @@ class PreprocessConfig:
     image_channels: int = 3
 
     # ── Denoising ─────────────────────────────────────────────────────────────
-    apply_denoise: bool = True
+    # IMPORTANT: training DataLoaders (MRIDataset + build_eval_transform) do
+    # NOT apply any denoising or CLAHE.  Enabling these at inference would
+    # shift the pixel distribution away from what the model was trained on and
+    # cause wrong predictions.  Both flags default to False so that inference
+    # matches the training pipeline exactly.
+    apply_denoise: bool = False
     denoise_kernel_size: int = 3
 
     # ── Contrast enhancement ──────────────────────────────────────────────────
-    apply_clahe: bool = True
+    # See note above — must stay False for inference to match training.
+    apply_clahe: bool = False
     clahe_clip_limit: float = 2.0
     clahe_tile_grid_size: Tuple[int, int] = (8, 8)
 
     # ── Normalisation ─────────────────────────────────────────────────────────
-    # EfficientNetB3 (and all EfficientNet variants in Keras/TF) have an
-    # internal preprocessing layer that maps pixel values [0, 255] → [-1, 1].
-    # We therefore pass pixels in the range [0, 1] (simple /255 rescale) and
-    # the backbone handles the rest.  Do NOT apply ImageNet z-score here —
-    # doing so double-normalises the input and completely corrupts predictions.
-    normalise: bool = False          # simple /255 rescale only
+    # PyTorch models (MambaVision, EfficientNet, ResNet50, VGG16, CNN) are
+    # trained with torchvision DataLoaders that apply:
+    #   ToTensor() → [0, 1]  then  Normalize(IMAGENET_MEAN, IMAGENET_STD)
+    #
+    # TorchImageClassifier._to_tensor() reapplies the same ImageNet z-score
+    # to the raw /255-rescaled NHWC array it receives from this pipeline.
+    # Therefore inference normalisation must be:
+    #   /255 rescale only (normalise=False) → let _to_tensor handle z-score.
+    #
+    # Do NOT set normalise=True here — that would double-normalise the input.
+    normalise: bool = False          # /255 rescale only; z-score applied by TorchImageClassifier
     norm_mean: Tuple[float, float, float] = IMAGENET_MEAN  # kept for legacy shims
     norm_std:  Tuple[float, float, float] = IMAGENET_STD   # kept for legacy shims
 

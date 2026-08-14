@@ -91,10 +91,36 @@ class TorchImageClassifier:
 
         x = self._to_tensor(batch).to(self.device)
 
+        # ── Diagnostic ───────────────────────────────────────────────────────
+        logger.info(
+            "[TorchImageClassifier:diag] "
+            "input_nhwc_shape=%s input_min=%.4f input_max=%.4f input_mean=%.4f | "
+            "tensor_nchw_shape=%s tensor_min=%.4f tensor_max=%.4f tensor_mean=%.4f | "
+            "device=%s model=%s",
+            batch.shape,
+            float(batch.min()),
+            float(batch.max()),
+            float(batch.mean()),
+            tuple(x.shape),
+            float(x.min().item()),
+            float(x.max().item()),
+            float(x.mean().item()),
+            self.device,
+            type(self.model).__name__,
+        )
+
         with torch.inference_mode():
             out = self.model(x)
             logits = out.logits if hasattr(out, "logits") else out
             probs = torch.softmax(logits, dim=-1)
+
+        # ── Diagnostic: raw logits and probabilities ──────────────────────────
+        logger.info(
+            "[TorchImageClassifier:diag] "
+            "raw_logits=%s | softmax_probs=%s",
+            [round(v, 4) for v in logits[0].detach().cpu().tolist()],
+            [round(v, 4) for v in probs[0].detach().cpu().tolist()],
+        )
 
         return probs.detach().cpu().numpy().astype(np.float32)
 

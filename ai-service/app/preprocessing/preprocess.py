@@ -380,13 +380,18 @@ def preprocess_image(
     source: str | bytes | Path,
     *,
     target_size: Optional[int] = None,
-    apply_denoise: bool = True,
-    apply_contrast: bool = True,
+    apply_denoise: bool = False,
+    apply_contrast: bool = False,
     expand_dims: bool = True,
     cfg: Optional[PreprocessConfig] = None,
 ) -> np.ndarray:
     """
     Backward-compatible shim → ``preprocess_for_inference()``.
+
+    ``apply_denoise`` and ``apply_contrast`` default to **False** to match the
+    training DataLoader (``build_eval_transform``) which applies neither
+    denoising nor CLAHE.  Enabling them at inference would shift pixel
+    distributions away from training data and cause wrong predictions.
     """
     _cfg = PreprocessConfig(
         image_size=target_size or (cfg.image_size if cfg else DEFAULT_CONFIG.image_size),
@@ -406,11 +411,14 @@ def preprocess_image_for_gradcam(
     source: str | bytes | Path,
     *,
     target_size: Optional[int] = None,
-    apply_denoise: bool = True,
-    apply_contrast: bool = True,
+    apply_denoise: bool = False,
+    apply_contrast: bool = False,
     cfg: Optional[PreprocessConfig] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Backward-compatible shim → ``preprocess_for_gradcam()``."""
+    """Backward-compatible shim → ``preprocess_for_gradcam()``.
+
+    Denoise and CLAHE default to False to match training DataLoader transforms.
+    """
     _cfg = PreprocessConfig(
         image_size=target_size or (cfg.image_size if cfg else DEFAULT_CONFIG.image_size),
         apply_denoise=apply_denoise,

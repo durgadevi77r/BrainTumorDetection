@@ -79,7 +79,7 @@ class TestEnvExample:
             ".env.example should default AI_SERVICE_DEBUG to true (development)"
 
     def test_default_active_model_is_valid(self):
-        valid = {"cnn", "vgg16", "resnet50", "efficientnet"}
+        valid = {"cnn", "vgg16", "resnet50", "efficientnet", "mambavision"}
         model = self._vars.get("ACTIVE_MODEL", "").lower()
         assert model in valid, f"ACTIVE_MODEL default '{model}' not in {valid}"
 

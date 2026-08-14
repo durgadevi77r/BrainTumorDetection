@@ -581,7 +581,7 @@ class TestErrorHandling:
         assert resp.status_code == 404
 
     def test_models_reload_no_weights_returns_404(self) -> None:
-        resp = client.post("/api/v1/models/reload", json={"model_name": "cnn"})
+        resp = client.post("/api/v1/models/reload", json={"model_name": "vgg16"})
         assert resp.status_code == 404
 
     # ── Invalid requests ──────────────────────────────────────────────────────
