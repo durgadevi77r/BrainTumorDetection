@@ -157,13 +157,39 @@ def _save_hf(
     model_dir: Path,
     name: str,
 ) -> tuple[str, Path]:
-    """Save using Hugging Face ``save_pretrained``."""
+    """
+    Save using Hugging Face ``save_pretrained``, then patch config.json.
+
+    MambaVision's upstream HF config stores ``num_labels=1000`` (ImageNet).
+    After ``save_pretrained`` writes config.json we overwrite ``num_labels``
+    and ``id2label`` / ``label2id`` with the actual training values from
+    ``settings``, so a future ``from_pretrained(local_dir)`` round-trip
+    produces the correct head size without needing any post-load patching.
+    """
     try:
         model.save_pretrained(str(model_dir))
     except Exception as exc:
         raise RuntimeError(
             f"Failed to save HF model '{name}' via save_pretrained: {exc}"
         ) from exc
+
+    # ── Patch config.json with actual num_labels / label maps ────────────────
+    config_path = model_dir / "config.json"
+    if config_path.is_file():
+        try:
+            with open(config_path, "r", encoding="utf-8") as fh:
+                cfg_data = json.load(fh)
+            cfg_data["num_labels"] = settings.num_classes
+            cfg_data["id2label"]   = {str(i): c for i, c in enumerate(settings.classes)}
+            cfg_data["label2id"]   = {c: i for i, c in enumerate(settings.classes)}
+            with open(config_path, "w", encoding="utf-8") as fh:
+                json.dump(cfg_data, fh, indent=2)
+            logger.debug(
+                f"config.json patched: num_labels={settings.num_classes} "
+                f"classes={settings.classes}"
+            )
+        except Exception as exc:
+            logger.warning(f"Could not patch config.json for '{name}': {exc}")
 
     # Primary artefact is either model.safetensors or pytorch_model.bin
     model_path = model_dir / "model.safetensors"

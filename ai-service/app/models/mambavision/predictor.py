@@ -111,7 +111,12 @@ class TorchImageClassifier:
 
         with torch.inference_mode():
             out = self.model(x)
-            logits = out.logits if hasattr(out, "logits") else out
+            if isinstance(out, dict):
+                logits = out["logits"]
+            elif hasattr(out, "logits"):
+                logits = out.logits
+            else:
+                logits = out
             probs = torch.softmax(logits, dim=-1)
 
         # ── Diagnostic: raw logits and probabilities ──────────────────────────

@@ -204,11 +204,23 @@ router.post('/:imageId', validateImageId, async (req, res, next) => {
     const gradcamAbsPath = aiData.gradcam_path ?? null;   // absolute path on AI service
 
     // ── Convert Grad-CAM absolute path to a static URL ────────────────────────
-    // AI service saves to:  <ai-service>/gradcam_output/<image_id>.png
-    // Express serves:       /gradcam/<filename>   (added in server.js)
+    // AI service saves to:  <ai-service>/gradcam_output/<image_id>/overlay.png
+    // Express serves:       /gradcam/<image_id>/overlay.png   (added in server.js)
+    // We need to extract the relative path from within gradcam_output/, NOT just basename.
     let gradcamUrl = null;
     if (gradcamAbsPath) {
-      gradcamUrl = `/gradcam/${path.basename(gradcamAbsPath)}`;
+      const gradcamOutputMarker = 'gradcam_output' + path.sep;
+      const markerIdx = gradcamAbsPath.indexOf(gradcamOutputMarker);
+      if (markerIdx !== -1) {
+        // Extract path relative to gradcam_output/, replace OS sep with URL sep
+        const relPath = gradcamAbsPath
+          .substring(markerIdx + gradcamOutputMarker.length)
+          .replace(/\\/g, '/');
+        gradcamUrl = `/gradcam/${relPath}`;
+      } else {
+        // Fallback: use just the basename (flat directory structure)
+        gradcamUrl = `/gradcam/${path.basename(gradcamAbsPath)}`;
+      }
     }
 
     timer.stop();

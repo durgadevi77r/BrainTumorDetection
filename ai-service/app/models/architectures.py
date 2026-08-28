@@ -326,22 +326,46 @@ def unfreeze_top_layers(model: nn.Module, n_layers: int = 20) -> nn.Module:
         logger.info("unfreeze_top_layers: CustomCNN is fully trainable — no-op")
         return model
 
-    # HF / MambaVision — unfreeze the last n_layers top-level children
-    children = list(model.children())
-    if not children:
-        # Flat model — unfreeze all
+    # HF / MambaVision — unfreeze the last n_layers backbone modules.
+    #
+    # MambaVisionModelForImageClassification has a single top-level child
+    # ``model.model`` (the inner MambaVision object) which itself has these
+    # children in order: [patch_embed, levels, norm, avgpool, head].
+    #
+    # ``levels`` is a ModuleList containing 4 level blocks, each of which
+    # contains multiple transformer/SSM blocks.  To give n_layers meaningful
+    # granularity we flatten the inner children of ``levels`` plus the other
+    # top-level modules and unfreeze the last n.
+    inner = getattr(model, "model", None)
+    target = inner if (inner is not None and len(list(inner.children())) > 1) else model
+
+    # Build a flat ordered list of unfreeze candidates
+    flat_modules: list[nn.Module] = []
+    for name, child in target.named_children():
+        if name == "head":
+            # head is already trainable — skip
+            continue
+        # Check if child is a ModuleList/Sequential worth expanding
+        grandchildren = list(child.children())
+        if grandchildren:
+            flat_modules.extend(grandchildren)
+        else:
+            flat_modules.append(child)
+
+    if not flat_modules:
         for p in model.parameters():
             p.requires_grad_(True)
-        logger.info("unfreeze_top_layers: flat model — all parameters unfrozen")
+        logger.info("unfreeze_top_layers: no backbone modules found — all unfrozen")
         return model
 
-    for child in children[-n_layers:]:
-        for p in child.parameters():
+    n = min(n_layers, len(flat_modules))
+    for mod in flat_modules[-n:]:
+        for p in mod.parameters():
             p.requires_grad_(True)
 
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(
-        f"unfreeze_top_layers: unfrozen top {n_layers} modules | "
+        f"unfreeze_top_layers: unfrozen top {n}/{len(flat_modules)} modules | "
         f"trainable_params={trainable:,}"
     )
     return model

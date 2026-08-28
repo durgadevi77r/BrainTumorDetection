@@ -462,7 +462,16 @@ class Trainer:
                     enabled=amp_enabled,
                 ):
                     outputs = self.model(images)
-                    logits = outputs.logits if hasattr(outputs, "logits") else outputs
+                    # Handle three output formats:
+                    #   1. HF model returning a dict {'logits': Tensor}
+                    #   2. HF model returning an object with .logits attribute
+                    #   3. plain Tensor (CNN/torchvision models)
+                    if isinstance(outputs, dict):
+                        logits = outputs["logits"]
+                    elif hasattr(outputs, "logits"):
+                        logits = outputs.logits
+                    else:
+                        logits = outputs
                     loss = criterion(logits, labels)
 
                 if training and optimizer is not None:

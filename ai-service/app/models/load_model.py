@@ -134,25 +134,70 @@ def _load_hf_model(name: str, model_path: Path) -> Any:
     The directory must contain ``config.json`` (and typically
     ``model.safetensors`` or ``pytorch_model.bin``).
 
-    Returns a ``TorchImageClassifier`` wrapping the HF model.
+    Loading strategy
+    ----------------
+    ``save_pretrained`` persists the HF model config as-is.  For MambaVision
+    the upstream config stores ``num_labels=1000`` (ImageNet labels) regardless
+    of how many classes were used during training, so calling
+    ``from_pretrained(local_dir)`` naively would create a 1000-class head and
+    then fail with a size-mismatch when loading the saved 4-class weights.
+
+    We therefore:
+    1. Build a fresh 4-class skeleton via ``build_mambavision_model`` (same
+       architecture used during training, no pretrained weights).
+    2. Load the saved ``model.safetensors`` / ``pytorch_model.bin`` as a plain
+       state_dict into that skeleton.
+
+    This is safe because both the skeleton and the saved file have identical
+    architectures — the only difference from the vanilla HF model is the
+    head size.
+
+    Returns a ``TorchImageClassifier`` wrapping the loaded model.
     """
-    # Lazy imports — torch and transformers are heavy; avoid them in test envs
-    # that mock the model layer.
-    from transformers import AutoModelForImageClassification          # noqa: PLC0415
-    from app.models.mambavision.config import MambaVisionHFConfig    # noqa: PLC0415
-    from app.models.mambavision.predictor import TorchImageClassifier # noqa: PLC0415
+    import torch                                                            # noqa: PLC0415
+    from safetensors.torch import load_file as load_safetensors            # noqa: PLC0415
+    from app.models.mambavision.factory import build_mambavision_model     # noqa: PLC0415
+    from app.models.mambavision.config import MambaVisionHFConfig          # noqa: PLC0415
+    from app.models.mambavision.predictor import TorchImageClassifier      # noqa: PLC0415
 
     hf_cfg = MambaVisionHFConfig()
+
+    # ── Step 1: build the correct 4-class skeleton (no pretrained weights) ──
     try:
-        model = AutoModelForImageClassification.from_pretrained(
-            str(model_path),
-            trust_remote_code=hf_cfg.trust_remote_code,
-        )
+        model = build_mambavision_model(cfg=hf_cfg, pretrained=False)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Failed to build MambaVision skeleton for '{name}': {exc}"
+        ) from exc
+
+    # Unfreeze all params so load_state_dict works without strict=False issues
+    for p in model.parameters():
+        p.requires_grad_(True)
+
+    # ── Step 2: locate the weights file ──────────────────────────────────────
+    safetensors_path = model_path / "model.safetensors"
+    bin_path         = model_path / "pytorch_model.bin"
+
+    try:
+        if safetensors_path.is_file():
+            state_dict = load_safetensors(str(safetensors_path), device="cpu")
+        elif bin_path.is_file():
+            state_dict = torch.load(str(bin_path), map_location="cpu", weights_only=True)
+        else:
+            raise FileNotFoundError(
+                f"Neither model.safetensors nor pytorch_model.bin found in {model_path}"
+            )
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        if missing:
+            logger.warning(f"_load_hf_model '{name}': missing keys: {missing}")
+        if unexpected:
+            logger.warning(f"_load_hf_model '{name}': unexpected keys: {unexpected}")
     except Exception as exc:
         raise RuntimeError(
             f"Failed to load HF model '{name}' from {model_path}: {exc}"
         ) from exc
 
+    logger.info(f"HF model '{name}' weights loaded from {model_path}")
     return TorchImageClassifier(model)
 
 

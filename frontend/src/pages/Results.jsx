@@ -9,7 +9,7 @@ import ComparisonChart from '../components/ComparisonChart';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 import Button from '../components/Button';
-import { getResults, getComparison } from '../services/api';
+import { getResults, getComparison, getMetrics } from '../services/api';
 
 export default function Results() {
   const [searchParams] = useSearchParams();
@@ -18,6 +18,7 @@ export default function Results() {
 
   const [resultData,  setResultData]  = useState(null);
   const [compareData, setCompareData] = useState(null);
+  const [metricsData, setMetricsData] = useState(null);
   const [isLoading,   setIsLoading]   = useState(false);
   const [error,       setError]       = useState('');
 
@@ -27,12 +28,19 @@ export default function Results() {
     setError('');
 
     try {
-      const [resResult, resCompare] = await Promise.all([
+      const [resResult, resCompare, resMetrics] = await Promise.all([
         getResults(imageId),
         getComparison(),
+        getMetrics(),
       ]);
       setResultData(resResult?.data ?? resResult);
       setCompareData(resCompare?.data ?? resCompare);
+
+      // Global model metrics come from GET /api/metrics
+      // They are either real computed values (after POST /api/evaluate)
+      // or placeholder paper targets (before any evaluation run).
+      const mData = resMetrics?.data ?? resMetrics;
+      setMetricsData(mData);
     } catch (err) {
       setError(err.message || 'Failed to load results.');
     } finally {
@@ -151,10 +159,15 @@ export default function Results() {
               <FeatureTable features={resultData.features} />
             </div>
 
-            {/* 5. Evaluation metrics */}
+            {/* 5. Evaluation metrics — from GET /api/metrics (global model evaluation) */}
             <div className="card">
               <h2 className="section-title">Evaluation Metrics</h2>
-              <MetricsTable metrics={resultData.metrics} />
+              {metricsData?.status && (
+                <p className="text-xs text-amber-600 mb-2 px-1">
+                  ⚠ {metricsData.status}
+                </p>
+              )}
+              <MetricsTable metrics={metricsData} />
             </div>
 
             {/* 6. Comparison charts */}

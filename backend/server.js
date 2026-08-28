@@ -25,6 +25,7 @@ const resultsRoute   = require('./api/results.route');
 const batchRoute     = require('./api/batch.route');
 const metricsRoute   = require('./api/metrics.route');
 const compareRoute   = require('./api/compare.route');
+const evaluateRoute  = require('./api/evaluate.route');
 
 // ─── Create Express app ───────────────────────────────────────────────────────
 const app = express();
@@ -124,6 +125,7 @@ app.get('/api', (_req, res) => {
       { method: 'GET',   path: '/api/results/:imageId',    description: 'Get full pipeline result for an image' },
       { method: 'POST',  path: '/api/batch',               description: 'Run complete pipeline in one call' },
       { method: 'GET',   path: '/api/metrics',             description: 'Get model evaluation metrics (Eq. 28–32)' },
+      { method: 'POST',  path: '/api/evaluate',            description: 'Run full model evaluation and store metrics' },
       { method: 'GET',   path: '/api/compare',             description: 'Get EDN-SVM vs baseline comparison (Figures 9–14)' },
     ],
   });
@@ -139,6 +141,7 @@ app.use('/api/results',           resultsRoute);
 app.use('/api/batch',             batchRoute);
 app.use('/api/metrics',           metricsRoute);
 app.use('/api/compare',           compareRoute);
+app.use('/api/evaluate',          evaluateRoute);
 
 // ─── 404 handler ──────────────────────────────────────────────────────────────
 // Must come AFTER all routes, BEFORE errorHandler

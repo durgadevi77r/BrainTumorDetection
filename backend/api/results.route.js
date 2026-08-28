@@ -95,10 +95,22 @@ router.get('/:imageId', validateImageId, (req, res, next) => {
       ? toUrl(processed.segmented_path, processedBase, '/processed')
       : null;
 
-    // Grad-CAM: stored as absolute path in <ai-service>/gradcam_output/<id>.png
+    // Grad-CAM: stored as absolute path in <ai-service>/gradcam_output/<image_id>/overlay.png
+    // Express serves /gradcam/ → <ai-service>/gradcam_output/
+    // Extract the relative path from within gradcam_output/ for nested subdirectory structure.
     let gradcamUrl = null;
     if (resultRow?.gradcam_path) {
-      gradcamUrl = `/gradcam/${path.basename(resultRow.gradcam_path)}`;
+      const sep = resultRow.gradcam_path.includes('/') ? '/' : path.sep;
+      const marker = `gradcam_output${sep}`;
+      const markerIdx = resultRow.gradcam_path.indexOf(marker);
+      if (markerIdx !== -1) {
+        const relPath = resultRow.gradcam_path
+          .substring(markerIdx + marker.length)
+          .replace(/\\/g, '/');
+        gradcamUrl = `/gradcam/${relPath}`;
+      } else {
+        gradcamUrl = `/gradcam/${path.basename(resultRow.gradcam_path)}`;
+      }
     }
 
     // ── Parse stored probabilities JSON ───────────────────────────────────────
